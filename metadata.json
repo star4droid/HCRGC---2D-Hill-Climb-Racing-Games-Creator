@@ -1,0 +1,6 @@
+{
+  "name": "HCRGC",
+  "description": "Hill Climb Racing Games Creator - Mobile 2D physics-based game creator & editor",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
