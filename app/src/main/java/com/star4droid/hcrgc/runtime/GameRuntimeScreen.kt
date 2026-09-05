@@ -93,74 +93,79 @@ fun GameRuntimeScreen(
         }
     }
 
-    // 60 FPS Game Loop
+    // High-performance Hardware-Synchronized Game Loop (60+ FPS on all devices)
     LaunchedEffect(isPaused, isFinished) {
-        val dt = 1f / 60f
+        var lastFrameNanos = 0L
         while (!isPaused && !isFinished) {
-            gameTime += dt
-            frameCount++
-            val now = System.currentTimeMillis()
-            if (now - lastFpsTimestamp >= 400) {
-                currentFps = ((frameCount * 1000f) / (now - lastFpsTimestamp)).toInt().coerceIn(10, 120)
-                frameCount = 0
-                lastFpsTimestamp = now
-            }
+            withFrameNanos { frameTimeNanos ->
+                if (lastFrameNanos == 0L) lastFrameNanos = frameTimeNanos
+                val dtNanos = frameTimeNanos - lastFrameNanos
+                lastFrameNanos = frameTimeNanos
+                val dt = (dtNanos / 1_000_000_000f).coerceIn(0.005f, 0.033f)
 
-            // Update user input to vehicle controller
-            val vc = simContext.vehicleController
-            if (vc != null) {
-                vc.throttle = when {
-                    isGasPressed -> 1.0f
-                    isBrakePressed -> -0.8f
-                    else -> 0f
-                }
-                vc.airTilt = when {
-                    isTiltLeftPressed -> -1.0f
-                    isTiltRightPressed -> 1.0f
-                    else -> 0f
+                gameTime += dt
+                frameCount++
+                val now = System.currentTimeMillis()
+                if (now - lastFpsTimestamp >= 400) {
+                    currentFps = ((frameCount * 1000f) / (now - lastFpsTimestamp)).toInt().coerceIn(10, 144)
+                    frameCount = 0
+                    lastFpsTimestamp = now
                 }
 
-                vc.update(dt, simContext.terrainSegments, simContext.staticBoxes)
-            }
+                // Update user input to vehicle controller
+                val vc = simContext.vehicleController
+                if (vc != null) {
+                    vc.throttle = when {
+                        isGasPressed -> 1.0f
+                        isBrakePressed -> -0.85f
+                        else -> 0f
+                    }
+                    vc.airTilt = when {
+                        isTiltLeftPressed -> -1.0f
+                        isTiltRightPressed -> 1.0f
+                        else -> 0f
+                    }
 
-            // Step physics world (including all dynamic boxes, crates, circles)
-            simContext.physicsWorld.step(dt, simContext.terrainSegments, simContext.staticBoxes)
+                    vc.update(dt, simContext.terrainSegments, simContext.staticBoxes)
+                }
 
-            // Check coin collisions
-            val carPos = vc?.chassis?.position ?: Vec2(0f, 0f)
-            for (coin in simContext.dynamicCoins) {
-                if (!collectedCoinIds.contains(coin.id)) {
-                    val dist = hypot(carPos.x - coin.x, carPos.y - coin.y)
-                    if (dist < 50f) {
-                        collectedCoinIds.add(coin.id)
-                        coinsCollected += (coin.coin?.value ?: 10)
+                // Step physics world (including all dynamic boxes, crates, circles)
+                simContext.physicsWorld.step(dt, simContext.terrainSegments, simContext.staticBoxes)
+
+                // Check coin collisions
+                val carPos = vc?.chassis?.position ?: Vec2(0f, 0f)
+                for (coin in simContext.dynamicCoins) {
+                    if (!collectedCoinIds.contains(coin.id)) {
+                        val dist = hypot(carPos.x - coin.x, carPos.y - coin.y)
+                        if (dist < 50f) {
+                            collectedCoinIds.add(coin.id)
+                            coinsCollected += (coin.coin?.value ?: 10)
+                        }
                     }
                 }
-            }
 
-            // Check finish flag collision
-            val finishFlagObj = simContext.finishFlag
-            if (finishFlagObj != null && !isFinished) {
-                val dist = hypot(carPos.x - finishFlagObj.x, carPos.y - finishFlagObj.y)
-                if (dist < 75f) {
-                    isFinished = true
-                    val threeStarTime = finishFlagObj.finishFlag?.timeForThreeStars ?: 35f
-                    val twoStarTime = finishFlagObj.finishFlag?.timeForTwoStars ?: 65f
-                    victoryStars = when {
-                        gameTime <= threeStarTime -> 3
-                        gameTime <= twoStarTime -> 2
-                        else -> 1
+                // Check finish flag collision
+                val finishFlagObj = simContext.finishFlag
+                if (finishFlagObj != null && !isFinished) {
+                    val dist = hypot(carPos.x - finishFlagObj.x, carPos.y - finishFlagObj.y)
+                    if (dist < 75f) {
+                        isFinished = true
+                        val threeStarTime = finishFlagObj.finishFlag?.timeForThreeStars ?: 35f
+                        val twoStarTime = finishFlagObj.finishFlag?.timeForTwoStars ?: 65f
+                        victoryStars = when {
+                            gameTime <= threeStarTime -> 3
+                            gameTime <= twoStarTime -> 2
+                            else -> 1
+                        }
                     }
                 }
+
+                // Smooth Camera Follow
+                val targetCamX = carPos.x
+                val targetCamY = carPos.y
+                camX += (targetCamX - camX) * 0.15f
+                camY += (targetCamY - camY) * 0.15f
             }
-
-            // Smooth Camera Follow
-            val targetCamX = carPos.x
-            val targetCamY = carPos.y
-            camX += (targetCamX - camX) * 0.12f
-            camY += (targetCamY - camY) * 0.12f
-
-            delay(16)
         }
     }
 
@@ -178,56 +183,34 @@ fun GameRuntimeScreen(
             val offsetX = screenW * 0.35f - camX * zoom
             val offsetY = screenH * 0.65f - camY * zoom
 
-            // 1. Draw All Custom Shapes (Terrain Roads & Polygons)
-            for (trackObj in level.objects.filter { it.type == ObjectType.CUSTOM_SHAPE && it.customShape != null }) {
-                val cs = trackObj.customShape ?: continue
-                if (cs.isTransparent) {
-                    // Transparent track: invisible in game, only acts as collision boundary!
-                    continue
-                }
-                val points = cs.points
-                if (points.size < 2) continue
-
-                val path = Path()
-                val p0 = points.first()
-                path.moveTo((trackObj.x + p0.x) * zoom + offsetX, (trackObj.y + p0.y) * zoom + offsetY)
-                for (i in 1 until points.size) {
-                    val pt = points[i]
-                    path.lineTo((trackObj.x + pt.x) * zoom + offsetX, (trackObj.y + pt.y) * zoom + offsetY)
-                }
-
-                if (cs.isClosed) {
-                    path.close()
-                    drawPath(path, Color(cs.surfaceColor))
-                    drawPath(path, Color(0xFF0F172A), style = Stroke(width = 3f * zoom))
-                } else {
-                    // Deep underground fill using cs.bodyColor
-                    val dirtPath = path.copy().apply {
-                        val last = points.last()
-                        val first = points.first()
-                        lineTo((trackObj.x + last.x) * zoom + offsetX, (trackObj.y + 1400f) * zoom + offsetY)
-                        lineTo((trackObj.x + first.x) * zoom + offsetX, (trackObj.y + 1400f) * zoom + offsetY)
-                        close()
+            // 1. Draw All Custom Shapes (Terrain Roads & Polygons) from pre-cached geometry
+            for (cached in simContext.cachedCustomShapes) {
+                scale(zoom, zoom, pivot = Offset.Zero) {
+                    translate(offsetX / zoom, offsetY / zoom) {
+                        if (cached.isClosed) {
+                            drawPath(cached.surfacePath, Color(cached.surfaceColor))
+                            drawPath(cached.surfacePath, Color(0xFF0F172A), style = Stroke(width = 3f))
+                        } else {
+                            if (cached.dirtPath != null) {
+                                drawPath(cached.dirtPath, Color(cached.bodyColor))
+                            }
+                            drawPath(
+                                cached.surfacePath,
+                                color = Color(cached.surfaceColor),
+                                style = Stroke(width = cached.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            )
+                            drawPath(
+                                cached.surfacePath,
+                                color = Color(cached.surfaceColor).copy(alpha = 0.75f),
+                                style = Stroke(width = (cached.strokeWidth * 0.28f).coerceAtLeast(3f), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            )
+                        }
                     }
-                    drawPath(dirtPath, Color(cs.bodyColor))
-
-                    // Surface stroke using cs.surfaceColor & cs.strokeWidth
-                    drawPath(
-                        path,
-                        color = Color(cs.surfaceColor),
-                        style = Stroke(width = cs.strokeWidth * zoom, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                    )
-                    // Surface top highlight
-                    drawPath(
-                        path,
-                        color = Color(cs.surfaceColor).copy(alpha = 0.75f),
-                        style = Stroke(width = (cs.strokeWidth * 0.28f).coerceAtLeast(3f) * zoom, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                    )
                 }
             }
 
             // 2. Draw TileMap Blocks
-            for (obj in level.objects.filter { it.type == ObjectType.TILEMAP && it.tileMap != null }) {
+            for (obj in simContext.cachedTileMaps) {
                 val tm = obj.tileMap ?: continue
                 val tw = tm.tileWidth * zoom
                 val th = tm.tileHeight * zoom
@@ -246,18 +229,7 @@ fun GameRuntimeScreen(
             }
 
             // 3. Draw All General Objects (Dynamic Boxes, Circles, Custom Sprites, Obstacles)
-            val nonSpecialObjects = level.objects.filter {
-                it.type != ObjectType.CUSTOM_SHAPE &&
-                it.type != ObjectType.TILEMAP &&
-                it.type != ObjectType.CAR_BODY &&
-                it.type != ObjectType.WHEEL &&
-                it.type != ObjectType.COIN &&
-                it.type != ObjectType.FINISH_FLAG &&
-                it.type != ObjectType.UI_BUTTON &&
-                it.type != ObjectType.UI_TEXT
-            }.sortedBy { it.zIndex }
-
-            for (obj in nonSpecialObjects) {
+            for (obj in simContext.cachedNonSpecialObjects) {
                 // Check if simulated dynamically in physics world
                 val body = simContext.physicsWorld.bodies.find { it.id == obj.id }
                 val posX = (body?.position?.x ?: obj.x) * zoom + offsetX
@@ -464,9 +436,6 @@ fun GameRuntimeScreen(
         }
 
         // SCREEN HUD LAYER (Always rendered on top of game world, immune to lighting)
-        val hudUiObjects = level.objects.filter {
-            it.visible && (it.type == ObjectType.UI_BUTTON || it.type == ObjectType.UI_TEXT || it.type == ObjectType.UI_PROGRESS_BAR)
-        }
         RuntimeHUD(
             coins = coinsCollected,
             timeSeconds = gameTime,
@@ -475,7 +444,7 @@ fun GameRuntimeScreen(
             showFps = showFps,
             fps = currentFps,
             onHideFps = { showFps = false },
-            uiObjects = hudUiObjects,
+            uiObjects = simContext.cachedHudUiObjects,
             onPauseClick = { isPaused = !isPaused },
             onGasPressedChange = { isGasPressed = it },
             onBrakePressedChange = { isBrakePressed = it },
@@ -891,23 +860,41 @@ private fun VictoryDialog(
     }
 }
 
+private data class CachedCustomShape(
+    val obj: GameObject,
+    val surfacePath: Path,
+    val dirtPath: Path?,
+    val isClosed: Boolean,
+    val surfaceColor: Long,
+    val bodyColor: Long,
+    val strokeWidth: Float
+)
+
 private data class SimulationContext(
     val physicsWorld: PhysicsWorld,
     val vehicleController: VehicleController?,
     val terrainSegments: List<Pair<Vec2, Vec2>>,
     val staticBoxes: List<FloatArray>,
     val dynamicCoins: List<GameObject>,
-    val finishFlag: GameObject?
+    val finishFlag: GameObject?,
+    val cachedCustomShapes: List<CachedCustomShape>,
+    val cachedTileMaps: List<GameObject>,
+    val cachedNonSpecialObjects: List<GameObject>,
+    val cachedLights: List<GameObject>,
+    val cachedHudUiObjects: List<GameObject>
 )
 
 private fun setupSimulation(project: ProjectConfig, level: LevelData): SimulationContext {
     val world = PhysicsWorld(gravity = Vec2(project.gravityX * 60f, project.gravityY * 60f))
 
-    // 1. Terrain Segments (all CUSTOM_SHAPE objects)
+    // 1. Terrain Segments and pre-cached custom shapes
     val segments = mutableListOf<Pair<Vec2, Vec2>>()
+    val cachedShapes = mutableListOf<CachedCustomShape>()
     for (obj in level.objects.filter { it.type == ObjectType.CUSTOM_SHAPE && it.customShape != null }) {
         val cs = obj.customShape ?: continue
         val pts = cs.points
+        if (pts.size < 2) continue
+
         for (i in 0 until pts.size - 1) {
             val p1 = Vec2(obj.x + pts[i].x, obj.y + pts[i].y)
             val p2 = Vec2(obj.x + pts[i + 1].x, obj.y + pts[i + 1].y)
@@ -917,6 +904,38 @@ private fun setupSimulation(project: ProjectConfig, level: LevelData): Simulatio
             val p1 = Vec2(obj.x + pts.last().x, obj.y + pts.last().y)
             val p2 = Vec2(obj.x + pts.first().x, obj.y + pts.first().y)
             segments.add(Pair(p1, p2))
+        }
+
+        if (!cs.isTransparent) {
+            val path = Path()
+            path.moveTo(obj.x + pts.first().x, obj.y + pts.first().y)
+            for (i in 1 until pts.size) {
+                path.lineTo(obj.x + pts[i].x, obj.y + pts[i].y)
+            }
+            var dirtPath: Path? = null
+            if (cs.isClosed) {
+                path.close()
+            } else {
+                dirtPath = Path().apply {
+                    addPath(path)
+                    val last = pts.last()
+                    val first = pts.first()
+                    lineTo(obj.x + last.x, obj.y + 1400f)
+                    lineTo(obj.x + first.x, obj.y + 1400f)
+                    close()
+                }
+            }
+            cachedShapes.add(
+                CachedCustomShape(
+                    obj = obj,
+                    surfacePath = path,
+                    dirtPath = dirtPath,
+                    isClosed = cs.isClosed,
+                    surfaceColor = cs.surfaceColor,
+                    bodyColor = cs.bodyColor,
+                    strokeWidth = cs.strokeWidth
+                )
+            )
         }
     }
 
@@ -1011,6 +1030,22 @@ private fun setupSimulation(project: ProjectConfig, level: LevelData): Simulatio
     // 5. Coins & Finish Flag
     val coins = level.objects.filter { it.type == ObjectType.COIN }
     val finish = level.objects.find { it.type == ObjectType.FINISH_FLAG }
+    val tileMaps = level.objects.filter { it.type == ObjectType.TILEMAP && it.tileMap != null }
+    val nonSpecial = level.objects.filter {
+        it.type != ObjectType.CUSTOM_SHAPE &&
+        it.type != ObjectType.TILEMAP &&
+        it.type != ObjectType.CAR_BODY &&
+        it.type != ObjectType.WHEEL &&
+        it.type != ObjectType.COIN &&
+        it.type != ObjectType.FINISH_FLAG &&
+        it.type != ObjectType.UI_BUTTON &&
+        it.type != ObjectType.UI_TEXT &&
+        it.type != ObjectType.UI_PROGRESS_BAR
+    }.sortedBy { it.zIndex }
+    val lights = level.objects.filter { it.type == ObjectType.LIGHT && it.light != null }
+    val hudUi = level.objects.filter {
+        it.visible && (it.type == ObjectType.UI_BUTTON || it.type == ObjectType.UI_TEXT || it.type == ObjectType.UI_PROGRESS_BAR)
+    }
 
     return SimulationContext(
         physicsWorld = world,
@@ -1018,6 +1053,11 @@ private fun setupSimulation(project: ProjectConfig, level: LevelData): Simulatio
         terrainSegments = segments,
         staticBoxes = boxes,
         dynamicCoins = coins,
-        finishFlag = finish
+        finishFlag = finish,
+        cachedCustomShapes = cachedShapes,
+        cachedTileMaps = tileMaps,
+        cachedNonSpecialObjects = nonSpecial,
+        cachedLights = lights,
+        cachedHudUiObjects = hudUi
     )
 }

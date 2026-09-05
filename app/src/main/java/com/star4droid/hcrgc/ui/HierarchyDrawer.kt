@@ -72,264 +72,193 @@ fun HierarchyDrawer(
 
             HorizontalDivider(color = StudioSurfaceBorder)
 
-            // UI Elements Layer Collection Header
+            // Separate UI Elements vs Scene Objects
             val uiObjects = state.level.objects.filter {
                 it.type == ObjectType.UI_BUTTON || it.type == ObjectType.UI_TEXT || it.type == ObjectType.UI_PROGRESS_BAR
-            }
-            Surface(
-                color = StudioSurfaceElevated,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, StudioSurfaceBorder)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Layers, contentDescription = null, tint = StudioAccentBlue, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text("UI Elements Layer", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StudioTextPrimary)
-                            Text("${uiObjects.size} UI elements in scene", fontSize = 10.sp, color = StudioTextSecondary)
-                        }
-                    }
+            }.sortedByDescending { it.zIndex }
 
-                    IconButton(
-                        onClick = { state.showUiElementsLayer = !state.showUiElementsLayer },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (state.showUiElementsLayer) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = "Toggle UI Elements Layer",
-                            tint = if (state.showUiElementsLayer) StudioAccentBlue else StudioTextTertiary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
+            val worldObjects = state.level.objects.filter {
+                it.type != ObjectType.UI_BUTTON && it.type != ObjectType.UI_TEXT && it.type != ObjectType.UI_PROGRESS_BAR
+            }.sortedByDescending { it.zIndex }
 
-            // Objects List (sorted by Z-order descending)
-            val sortedList = state.level.objects.sortedByDescending { it.zIndex }
+            var uiLayerExpanded by remember { mutableStateOf(true) }
+            var worldLayerExpanded by remember { mutableStateOf(true) }
 
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(vertical = 8.dp)
+                    .padding(vertical = 4.dp)
             ) {
-                items(sortedList, key = { it.id }) { obj ->
-                    val isSelected = (obj.id == state.selectedObjectId)
-                    val isChild = (obj.parentId != null)
-
+                // --- UI ELEMENTS LAYER SECTION ---
+                item {
                     Surface(
+                        color = StudioSurfaceElevated,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 3.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                state.selectedObjectId = obj.id
-                            }
-                            .testTag("hierarchy_item_${obj.id}"),
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) StudioAccentBlue.copy(alpha = 0.12f) else StudioSurface,
-                        border = if (isSelected) BorderStroke(1.5.dp, StudioAccentBlue) else null
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { uiLayerExpanded = !uiLayerExpanded },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, StudioSurfaceBorder)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(
-                                    start = if (isChild) 28.dp else 10.dp,
-                                    end = 8.dp,
-                                    top = 8.dp,
-                                    bottom = 8.dp
-                                ),
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            if (isChild) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = Icons.Default.SubdirectoryArrowRight,
-                                    contentDescription = "Child",
+                                    imageVector = if (uiLayerExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = StudioAccentBlue,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(Icons.Default.Layers, contentDescription = null, tint = StudioAccentBlue, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("UI Elements Layer", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StudioTextPrimary)
+                                Spacer(Modifier.width(6.dp))
+                                Surface(
+                                    color = StudioAccentBlue.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        "${uiObjects.size}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = StudioAccentBlue,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { state.showUiElementsLayer = !state.showUiElementsLayer },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (state.showUiElementsLayer) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = "Toggle UI Elements Layer",
+                                    tint = if (state.showUiElementsLayer) StudioAccentBlue else StudioTextTertiary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (uiLayerExpanded) {
+                    if (uiObjects.isEmpty()) {
+                        item {
+                            Text(
+                                "No UI elements yet (Add button/text from + menu)",
+                                fontSize = 11.sp,
+                                color = StudioTextTertiary,
+                                modifier = Modifier.padding(start = 24.dp, top = 2.dp, bottom = 6.dp)
+                            )
+                        }
+                    } else {
+                        items(uiObjects, key = { it.id }) { obj ->
+                            HierarchyItemRow(
+                                obj = obj,
+                                isSelected = (obj.id == state.selectedObjectId),
+                                onSelect = { state.selectedObjectId = obj.id },
+                                onToggleVisible = { state.updateObject(obj.copy(visible = !obj.visible)) },
+                                onOpenProperties = {
+                                    state.selectedObjectId = obj.id
+                                    onOpenProperties()
+                                },
+                                onRename = {
+                                    renameText = obj.name
+                                    renamingObj = obj
+                                },
+                                onDuplicate = { state.duplicateObject(obj.id) },
+                                onBringForward = { state.bringForward(obj.id) },
+                                onSendBackward = { state.sendBackward(obj.id) },
+                                onBringToFront = { state.bringToFront(obj.id) },
+                                onSendToBack = { state.sendToBack(obj.id) },
+                                onAssignParent = { assigningParentObj = obj },
+                                onSaveToLibrary = { onSaveToLibrary(obj) },
+                                onDelete = { state.removeObject(obj.id) }
+                            )
+                        }
+                    }
+                }
+
+                // --- WORLD OBJECTS SECTION ---
+                item {
+                    Surface(
+                        color = StudioSurfaceElevated,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { worldLayerExpanded = !worldLayerExpanded },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, StudioSurfaceBorder)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (worldLayerExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                                    contentDescription = null,
                                     tint = StudioAccentIndigo,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                            }
-
-                            // Object Type Icon
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .background(
-                                        when (obj.type) {
-                                            ObjectType.CAR_BODY, ObjectType.WHEEL -> StudioAccentOrange.copy(alpha = 0.15f)
-                                            ObjectType.COIN, ObjectType.FINISH_FLAG -> StudioAccentAmber.copy(alpha = 0.15f)
-                                            ObjectType.CUSTOM_SHAPE, ObjectType.TILEMAP -> StudioAccentGreen.copy(alpha = 0.15f)
-                                            ObjectType.ELEMENT -> StudioAccentIndigo.copy(alpha = 0.15f)
-                                            else -> StudioAccentBlue.copy(alpha = 0.15f)
-                                        },
-                                        RoundedCornerShape(6.dp)
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = when (obj.type) {
-                                        ObjectType.CAR_BODY -> Icons.Default.DirectionsCar
-                                        ObjectType.WHEEL -> Icons.Default.TireRepair
-                                        ObjectType.COIN -> Icons.Default.MonetizationOn
-                                        ObjectType.FINISH_FLAG -> Icons.Default.Flag
-                                        ObjectType.LIGHT -> Icons.Default.Lightbulb
-                                        ObjectType.TILEMAP -> Icons.Default.GridOn
-                                        ObjectType.CUSTOM_SHAPE -> Icons.Default.Polyline
-                                        ObjectType.ELEMENT -> Icons.Default.Widgets
-                                        ObjectType.UI_BUTTON -> Icons.Default.SmartButton
-                                        ObjectType.UI_TEXT -> Icons.Default.TextFields
-                                        else -> Icons.Default.Square
-                                    },
-                                    contentDescription = null,
-                                    tint = StudioTextPrimary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(10.dp))
-
-                            // Name & Type
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = obj.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = StudioTextPrimary,
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = "${obj.type.name} • Z:${obj.zIndex}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = StudioTextSecondary
-                                )
-                            }
-
-                            // Visibility Toggle
-                            IconButton(
-                                onClick = {
-                                    state.updateObject(obj.copy(visible = !obj.visible))
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (obj.visible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = "Toggle Visibility",
-                                    tint = if (obj.visible) StudioTextSecondary else StudioTextTertiary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            // Action Menu (Rename, Z-Order, Parent, Save as Reusable, Delete)
-                            var menuExpanded by remember { mutableStateOf(false) }
-                            Box {
-                                IconButton(
-                                    onClick = { menuExpanded = true },
-                                    modifier = Modifier.size(32.dp)
+                                Spacer(Modifier.width(4.dp))
+                                Icon(Icons.Default.Public, contentDescription = null, tint = StudioAccentIndigo, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Scene Elements", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StudioTextPrimary)
+                                Spacer(Modifier.width(6.dp))
+                                Surface(
+                                    color = StudioAccentIndigo.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(4.dp)
                                 ) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = StudioTextSecondary, modifier = Modifier.size(18.dp))
-                                }
-
-                                DropdownMenu(
-                                    expanded = menuExpanded,
-                                    onDismissRequest = { menuExpanded = false },
-                                    containerColor = StudioSurface
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Properties") },
-                                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                        onClick = {
-                                            state.selectedObjectId = obj.id
-                                            menuExpanded = false
-                                            onOpenProperties()
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Rename") },
-                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                        onClick = {
-                                            renameText = obj.name
-                                            renamingObj = obj
-                                            menuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Duplicate") },
-                                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
-                                        onClick = {
-                                            state.duplicateObject(obj.id)
-                                            menuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Bring Forward") },
-                                        leadingIcon = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
-                                        onClick = {
-                                            state.bringForward(obj.id)
-                                            menuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Send Backward") },
-                                        leadingIcon = { Icon(Icons.Default.ArrowDownward, contentDescription = null) },
-                                        onClick = {
-                                            state.sendBackward(obj.id)
-                                            menuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Bring to Front") },
-                                        leadingIcon = { Icon(Icons.Default.VerticalAlignTop, contentDescription = null) },
-                                        onClick = {
-                                            state.bringToFront(obj.id)
-                                            menuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Send to Back") },
-                                        leadingIcon = { Icon(Icons.Default.VerticalAlignBottom, contentDescription = null) },
-                                        onClick = {
-                                            state.sendToBack(obj.id)
-                                            menuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Set Parent Object") },
-                                        leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
-                                        onClick = {
-                                            assigningParentObj = obj
-                                            menuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Save as Reusable Element") },
-                                        leadingIcon = { Icon(Icons.Default.BookmarkBorder, contentDescription = null) },
-                                        onClick = {
-                                            onSaveToLibrary(obj)
-                                            menuExpanded = false
-                                        }
-                                    )
-                                    HorizontalDivider()
-                                    DropdownMenuItem(
-                                        text = { Text("Delete", color = StudioAccentRed) },
-                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = StudioAccentRed) },
-                                        onClick = {
-                                            state.removeObject(obj.id)
-                                            menuExpanded = false
-                                        }
+                                    Text(
+                                        "${worldObjects.size}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = StudioAccentIndigo,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                     )
                                 }
                             }
                         }
+                    }
+                }
+
+                if (worldLayerExpanded) {
+                    items(worldObjects, key = { it.id }) { obj ->
+                        HierarchyItemRow(
+                            obj = obj,
+                            isSelected = (obj.id == state.selectedObjectId),
+                            onSelect = { state.selectedObjectId = obj.id },
+                            onToggleVisible = { state.updateObject(obj.copy(visible = !obj.visible)) },
+                            onOpenProperties = {
+                                state.selectedObjectId = obj.id
+                                onOpenProperties()
+                            },
+                            onRename = {
+                                renameText = obj.name
+                                renamingObj = obj
+                            },
+                            onDuplicate = { state.duplicateObject(obj.id) },
+                            onBringForward = { state.bringForward(obj.id) },
+                            onSendBackward = { state.sendBackward(obj.id) },
+                            onBringToFront = { state.bringToFront(obj.id) },
+                            onSendToBack = { state.sendToBack(obj.id) },
+                            onAssignParent = { assigningParentObj = obj },
+                            onSaveToLibrary = { onSaveToLibrary(obj) },
+                            onDelete = { state.removeObject(obj.id) }
+                        )
                     }
                 }
             }
@@ -444,5 +373,234 @@ fun HierarchyDrawer(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun HierarchyItemRow(
+    obj: GameObject,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    onToggleVisible: () -> Unit,
+    onOpenProperties: () -> Unit,
+    onRename: () -> Unit,
+    onDuplicate: () -> Unit,
+    onBringForward: () -> Unit,
+    onSendBackward: () -> Unit,
+    onBringToFront: () -> Unit,
+    onSendToBack: () -> Unit,
+    onAssignParent: () -> Unit,
+    onSaveToLibrary: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val isChild = (obj.parentId != null)
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 1.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onSelect)
+            .testTag("hierarchy_item_${obj.id}"),
+        shape = RoundedCornerShape(6.dp),
+        color = if (isSelected) StudioAccentBlue.copy(alpha = 0.12f) else StudioSurface,
+        border = if (isSelected) BorderStroke(1.dp, StudioAccentBlue) else null
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = 36.dp)
+                .padding(
+                    start = if (isChild) 22.dp else 6.dp,
+                    end = 4.dp,
+                    top = 2.dp,
+                    bottom = 2.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isChild) {
+                Icon(
+                    imageVector = Icons.Default.SubdirectoryArrowRight,
+                    contentDescription = "Child",
+                    tint = StudioAccentIndigo,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(3.dp))
+            }
+
+            // Compact Type Icon Box
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .background(
+                        when (obj.type) {
+                            ObjectType.CAR_BODY, ObjectType.WHEEL -> StudioAccentOrange.copy(alpha = 0.15f)
+                            ObjectType.COIN, ObjectType.FINISH_FLAG -> StudioAccentAmber.copy(alpha = 0.15f)
+                            ObjectType.CUSTOM_SHAPE, ObjectType.TILEMAP -> StudioAccentGreen.copy(alpha = 0.15f)
+                            ObjectType.UI_BUTTON, ObjectType.UI_TEXT, ObjectType.UI_PROGRESS_BAR -> StudioAccentBlue.copy(alpha = 0.15f)
+                            ObjectType.ELEMENT -> StudioAccentIndigo.copy(alpha = 0.15f)
+                            else -> StudioSurfaceBorder
+                        },
+                        RoundedCornerShape(4.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = when (obj.type) {
+                        ObjectType.CAR_BODY -> Icons.Default.DirectionsCar
+                        ObjectType.WHEEL -> Icons.Default.TireRepair
+                        ObjectType.COIN -> Icons.Default.MonetizationOn
+                        ObjectType.FINISH_FLAG -> Icons.Default.Flag
+                        ObjectType.LIGHT -> Icons.Default.Lightbulb
+                        ObjectType.TILEMAP -> Icons.Default.GridOn
+                        ObjectType.CUSTOM_SHAPE -> Icons.Default.Polyline
+                        ObjectType.ELEMENT -> Icons.Default.Widgets
+                        ObjectType.UI_BUTTON -> Icons.Default.SmartButton
+                        ObjectType.UI_TEXT -> Icons.Default.TextFields
+                        ObjectType.UI_PROGRESS_BAR -> Icons.Default.LinearScale
+                        else -> Icons.Default.Square
+                    },
+                    contentDescription = null,
+                    tint = StudioTextPrimary,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Name & Compact Info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = obj.name,
+                    fontSize = 11.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) StudioAccentBlue else StudioTextPrimary,
+                    maxLines = 1
+                )
+                Text(
+                    text = "${obj.type.name} • Z:${obj.zIndex}",
+                    fontSize = 9.sp,
+                    color = StudioTextSecondary,
+                    maxLines = 1
+                )
+            }
+
+            // Compact Visibility Button
+            IconButton(
+                onClick = onToggleVisible,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = if (obj.visible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = "Toggle Visibility",
+                    tint = if (obj.visible) StudioTextSecondary else StudioTextTertiary,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+
+            // Action Menu
+            Box {
+                IconButton(
+                    onClick = { menuExpanded = true },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "Menu",
+                        tint = StudioTextSecondary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    containerColor = StudioSurface
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Properties") },
+                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onOpenProperties()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onRename()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Duplicate") },
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onDuplicate()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Bring Forward") },
+                        leadingIcon = { Icon(Icons.Default.ArrowUpward, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onBringForward()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Send Backward") },
+                        leadingIcon = { Icon(Icons.Default.ArrowDownward, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onSendBackward()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Bring to Front") },
+                        leadingIcon = { Icon(Icons.Default.VerticalAlignTop, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onBringToFront()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Send to Back") },
+                        leadingIcon = { Icon(Icons.Default.VerticalAlignBottom, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onSendToBack()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Set Parent Object") },
+                        leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAssignParent()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Save as Reusable Element") },
+                        leadingIcon = { Icon(Icons.Default.BookmarkBorder, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onSaveToLibrary()
+                        }
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = StudioAccentRed) },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = StudioAccentRed) },
+                        onClick = {
+                            menuExpanded = false
+                            onDelete()
+                        }
+                    )
+                }
+            }
+        }
     }
 }

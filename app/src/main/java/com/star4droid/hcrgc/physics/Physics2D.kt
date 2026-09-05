@@ -248,20 +248,68 @@ class PhysicsWorld(
                         if (overlapX < overlapY) {
                             if (body.position.x < (bLeft + bRight) / 2f) {
                                 body.position.x -= overlapX
-                                if (body.velocity.x > 0) body.velocity.x = 0f
+                                if (body.velocity.x > 0) body.velocity.x *= -body.restitution
                             } else {
                                 body.position.x += overlapX
-                                if (body.velocity.x < 0) body.velocity.x = 0f
+                                if (body.velocity.x < 0) body.velocity.x *= -body.restitution
                             }
                         } else {
                             if (body.position.y < (bTop + bBottom) / 2f) {
                                 body.position.y -= overlapY
-                                if (body.velocity.y > 0) body.velocity.y = 0f
+                                if (body.velocity.y > 0) body.velocity.y *= -body.restitution
                             } else {
                                 body.position.y += overlapY
-                                if (body.velocity.y < 0) body.velocity.y = 0f
+                                if (body.velocity.y < 0) body.velocity.y *= -body.restitution
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Dynamic body vs dynamic body collisions (including car chassis vs crates/boxes)
+        val nonSensors = bodies.filter { !it.isSensor }
+        for (i in nonSensors.indices) {
+            val a = nonSensors[i]
+            for (j in i + 1 until nonSensors.size) {
+                val b = nonSensors[j]
+                if (a.isStatic && b.isStatic) continue
+
+                val aHalfW = a.width / 2f
+                val aHalfH = a.height / 2f
+                val bHalfW = b.width / 2f
+                val bHalfH = b.height / 2f
+
+                val dx = b.position.x - a.position.x
+                val dy = b.position.y - a.position.y
+                val overlapX = (aHalfW + bHalfW) - abs(dx)
+                val overlapY = (aHalfH + bHalfH) - abs(dy)
+
+                if (overlapX > 0f && overlapY > 0f) {
+                    val totalMass = (if (a.isStatic) 0f else a.mass) + (if (b.isStatic) 0f else b.mass)
+                    if (totalMass <= 0.001f) continue
+
+                    val aRatio = if (a.isStatic) 0f else if (b.isStatic) 1f else b.mass / totalMass
+                    val bRatio = if (b.isStatic) 0f else if (a.isStatic) 1f else a.mass / totalMass
+
+                    if (overlapX < overlapY) {
+                        val sign = if (dx > 0) 1f else -1f
+                        if (!a.isStatic) a.position.x -= sign * overlapX * aRatio
+                        if (!b.isStatic) b.position.x += sign * overlapX * bRatio
+
+                        val relVelX = b.velocity.x - a.velocity.x
+                        val impulse = relVelX * (1f + min(a.restitution, b.restitution))
+                        if (!a.isStatic) a.velocity.x += impulse * aRatio * 0.7f
+                        if (!b.isStatic) b.velocity.x -= impulse * bRatio * 0.7f
+                    } else {
+                        val sign = if (dy > 0) 1f else -1f
+                        if (!a.isStatic) a.position.y -= sign * overlapY * aRatio
+                        if (!b.isStatic) b.position.y += sign * overlapY * bRatio
+
+                        val relVelY = b.velocity.y - a.velocity.y
+                        val impulse = relVelY * (1f + min(a.restitution, b.restitution))
+                        if (!a.isStatic) a.velocity.y += impulse * aRatio * 0.7f
+                        if (!b.isStatic) b.velocity.y -= impulse * bRatio * 0.7f
                     }
                 }
             }

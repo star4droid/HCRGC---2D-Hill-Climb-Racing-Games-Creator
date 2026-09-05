@@ -158,6 +158,8 @@ fun EditorCanvas(
                                               (startWy in (selObj.y - selObj.height / 2f)..(selObj.y + selObj.height / 2f))
                     }
 
+                    var lastPointerPos = downPos
+
                     while (true) {
                         val event = awaitPointerEvent()
                         val activePointers = event.changes.filter { it.pressed }
@@ -192,6 +194,7 @@ fun EditorCanvas(
 
                             if (!dragStarted && distFromDown > viewConfiguration.touchSlop) {
                                 dragStarted = true
+                                lastPointerPos = currPos
                                 // Initialize active drag mode
                                 if (state.isEditingShapePoints && selObj?.type == ObjectType.CUSTOM_SHAPE && selObj.customShape != null) {
                                     if (touchedPointIndex != -1) {
@@ -224,18 +227,13 @@ fun EditorCanvas(
                                                 activeDragMode = DragMode.MOVE_OBJECT
                                                 state.pushUndoState()
                                             } else {
-                                                // User touched canvas outside object -> PAN WORLD!
-                                                // Elements never move unexpectedly when clicking away!
                                                 activeDragMode = DragMode.PAN_WORLD
                                             }
                                         }
                                         TransformMode.MOVE -> {
-                                            if (touchedInsideObject) {
-                                                activeDragMode = DragMode.MOVE_OBJECT
-                                                state.pushUndoState()
-                                            } else {
-                                                activeDragMode = DragMode.PAN_WORLD
-                                            }
+                                            // MOVE mode explicitly drags the selected element
+                                            activeDragMode = DragMode.MOVE_OBJECT
+                                            state.pushUndoState()
                                         }
                                         TransformMode.ROTATE -> {
                                             activeDragMode = DragMode.ROTATE_OBJECT
@@ -253,49 +251,52 @@ fun EditorCanvas(
                             }
 
                             if (dragStarted) {
-                                val prevPos = pointer.previousPosition
-                                val dx = (currPos.x - prevPos.x) / state.zoom
-                                val dy = (currPos.y - prevPos.y) / state.zoom
-                                val screenDx = currPos.x - prevPos.x
-                                val screenDy = currPos.y - prevPos.y
+                                val dx = (currPos.x - lastPointerPos.x) / state.zoom
+                                val dy = (currPos.y - lastPointerPos.y) / state.zoom
+                                val screenDx = currPos.x - lastPointerPos.x
+                                val screenDy = currPos.y - lastPointerPos.y
+                                lastPointerPos = currPos
 
                                 when (activeDragMode) {
                                     DragMode.MOVE_POINT -> {
-                                        if (selObj?.type == ObjectType.CUSTOM_SHAPE && selObj.customShape != null) {
-                                            val pts = selObj.customShape.points.toMutableList()
+                                        val curObj = state.selectedObject
+                                        if (curObj?.type == ObjectType.CUSTOM_SHAPE && curObj.customShape != null) {
+                                            val pts = curObj.customShape.points.toMutableList()
                                             val idx = state.selectedPointIndex
                                             if (idx in pts.indices) {
                                                 val oldP = pts[idx]
-                                                // Update ONLY relative point coordinates - shape position is NEVER touched!
                                                 val newRelX = oldP.x + dx
                                                 val newRelY = oldP.y + dy
                                                 pts[idx] = Point2D(newRelX, newRelY)
-                                                state.updateObject(selObj.copy(customShape = selObj.customShape.copy(points = pts)))
+                                                state.updateObject(curObj.copy(customShape = curObj.customShape.copy(points = pts)))
                                             }
                                         }
                                     }
                                     DragMode.MOVE_OBJECT -> {
-                                        if (selObj != null) {
-                                            val newX = selObj.x + dx
-                                            val newY = selObj.y + dy
-                                            state.updateObject(selObj.copy(x = newX, y = newY))
+                                        val curObj = state.selectedObject
+                                        if (curObj != null) {
+                                            val newX = curObj.x + dx
+                                            val newY = curObj.y + dy
+                                            state.updateObject(curObj.copy(x = newX, y = newY))
                                         }
                                     }
                                     DragMode.ROTATE_OBJECT -> {
-                                        if (selObj != null) {
+                                        val curObj = state.selectedObject
+                                        if (curObj != null) {
                                             val dRot = screenDx * 0.45f
-                                            var newRot = (selObj.rotation + dRot) % 360f
+                                            var newRot = (curObj.rotation + dRot) % 360f
                                             if (newRot < 0) newRot += 360f
-                                            state.updateObject(selObj.copy(rotation = newRot))
+                                            state.updateObject(curObj.copy(rotation = newRot))
                                         }
                                     }
                                     DragMode.RESIZE_OBJECT -> {
-                                        if (selObj != null && selObj.type != ObjectType.CUSTOM_SHAPE) {
+                                        val curObj = state.selectedObject
+                                        if (curObj != null && curObj.type != ObjectType.CUSTOM_SHAPE) {
                                             val dw = dx * 2f
                                             val dh = dy * 2f
-                                            val newW = (selObj.width + dw).coerceAtLeast(16f)
-                                            val newH = (selObj.height + dh).coerceAtLeast(16f)
-                                            state.updateObject(selObj.copy(width = newW, height = newH))
+                                            val newW = (curObj.width + dw).coerceAtLeast(16f)
+                                            val newH = (curObj.height + dh).coerceAtLeast(16f)
+                                            state.updateObject(curObj.copy(width = newW, height = newH))
                                         }
                                     }
                                     DragMode.PAN_WORLD -> {
