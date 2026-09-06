@@ -28,6 +28,8 @@ import com.star4droid.hcrgc.editor.TransformMode
 import com.star4droid.hcrgc.model.*
 import com.star4droid.hcrgc.ui.theme.*
 
+private val LocalNumberKeypadRequester = compositionLocalOf<(String, Float, (Float) -> Unit) -> Unit> { { _, _, _ -> } }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PropertySheet(
@@ -35,25 +37,36 @@ fun PropertySheet(
     onDismiss: () -> Unit,
     onOpenAssetManager: () -> Unit
 ) {
-    val obj = state.selectedObject ?: return
+    if (state.selectedObjectId == null) return
 
-    var showTileMapResizeWarning by remember { mutableStateOf(false) }
-    var pendingCols by remember { mutableIntStateOf(obj.tileMap?.cols ?: 10) }
-    var pendingRows by remember { mutableIntStateOf(obj.tileMap?.rows ?: 5) }
+    var activeNumberEdit by remember { mutableStateOf<Pair<String, (Float) -> Unit>?>(null) }
+    var activeNumberValue by remember { mutableFloatStateOf(0f) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = StudioSurface
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
-                .verticalScroll(rememberScrollState())
-                .testTag("sheet_properties")
+        val obj = state.selectedObject
+        if (obj == null) {
+            LaunchedEffect(Unit) { onDismiss() }
+            return@ModalBottomSheet
+        }
+
+        CompositionLocalProvider(
+            LocalNumberKeypadRequester provides { label, currentVal, onConfirm ->
+                activeNumberValue = currentVal
+                activeNumberEdit = Pair(label, onConfirm)
+            }
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp)
+                    .verticalScroll(rememberScrollState())
+                    .testTag("sheet_properties")
+            ) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -89,64 +102,7 @@ fun PropertySheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // TRANSFORM MODES PANEL (Grid, Move, Rotate, Scale)
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = StudioSurfaceElevated,
-                border = BorderStroke(1.dp, StudioSurfaceBorder),
-                modifier = Modifier.fillMaxWidth().testTag("panel_transform_modes")
-            ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Text(
-                        text = "Canvas Transform Mode",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = StudioTextSecondary,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        TransformMode.values().forEach { mode ->
-                            val isSelected = (state.transformMode == mode)
-                            val icon = when (mode) {
-                                TransformMode.GRID -> Icons.Default.Grid4x4
-                                TransformMode.MOVE -> Icons.Default.OpenWith
-                                TransformMode.ROTATE -> Icons.Default.RotateRight
-                                TransformMode.SCALE -> Icons.Default.AspectRatio
-                            }
-                            val label = when (mode) {
-                                TransformMode.GRID -> "Grid"
-                                TransformMode.MOVE -> "Move"
-                                TransformMode.ROTATE -> "Rotate"
-                                TransformMode.SCALE -> "Scale"
-                            }
-
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { state.transformMode = mode },
-                                leadingIcon = {
-                                    Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp))
-                                },
-                                label = { Text(label, fontSize = 11.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                    val hint = when (state.transformMode) {
-                        TransformMode.GRID -> "Standard handles: drag corners to scale, top handle to rotate."
-                        TransformMode.MOVE -> "Move mode: drag single finger anywhere to shift position."
-                        TransformMode.ROTATE -> "Rotate mode: drag single finger left/right to rotate."
-                        TransformMode.SCALE -> if (obj.type == ObjectType.CUSTOM_SHAPE) "ChainShape curves are edited with the floating Pen point tool." else "Scale mode: drag single finger to resize dimensions."
-                    }
-                    Text(hint, style = MaterialTheme.typography.labelSmall, color = StudioAccentBlue, modifier = Modifier.padding(top = 4.dp))
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // SECTION 1: TRANSFORM
             PropertySectionHeader(title = "Transform", icon = Icons.Default.Transform)
@@ -412,17 +368,18 @@ fun PropertySheet(
                                         }
                                     },
                                     colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = if (state.isEditingShapePoints) StudioAccentOrange else StudioAccentBlue
-                                    )
+                                        containerColor = if (state.isEditingShapePoints) Color(0xFF10B981) else Color(0xFF0284C7)
+                                    ),
+                                    shape = CircleShape,
+                                    modifier = Modifier.size(40.dp),
+                                    contentPadding = PaddingValues(0.dp)
                                 ) {
                                     Icon(
-                                        imageVector = if (state.isEditingShapePoints) Icons.Default.Close else Icons.Default.Edit,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Points",
+                                        modifier = Modifier.size(20.dp),
                                         tint = Color.White
                                     )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(if (state.isEditingShapePoints) "Close" else "Edit Points", color = Color.White, fontSize = 12.sp)
                                 }
                             }
 
@@ -600,35 +557,19 @@ fun PropertySheet(
                 ObjectType.TILEMAP -> {
                     val tm = obj.tileMap ?: TileMapConfig()
                     Spacer(modifier = Modifier.height(20.dp))
-                    PropertySectionHeader(title = "TileMap Grid", icon = Icons.Default.GridOn)
+                    PropertySectionHeader(title = "TileMap (Non-Resizable)", icon = Icons.Default.GridOn)
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        NumericPropertyField(
-                            label = "Columns",
-                            value = tm.cols.toFloat(),
-                            modifier = Modifier.weight(1f),
-                            onValueChange = {
-                                pendingCols = it.toInt().coerceIn(1, 100)
-                                if (tm.tiles.isNotEmpty() && pendingCols != tm.cols) {
-                                    showTileMapResizeWarning = true
-                                } else {
-                                    state.updateObject(obj.copy(tileMap = tm.copy(cols = pendingCols)))
-                                }
-                            }
-                        )
-                        NumericPropertyField(
-                            label = "Rows",
-                            value = tm.rows.toFloat(),
-                            modifier = Modifier.weight(1f),
-                            onValueChange = {
-                                pendingRows = it.toInt().coerceIn(1, 50)
-                                if (tm.tiles.isNotEmpty() && pendingRows != tm.rows) {
-                                    showTileMapResizeWarning = true
-                                } else {
-                                    state.updateObject(obj.copy(tileMap = tm.copy(rows = pendingRows)))
-                                }
-                            }
-                        )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = StudioSurfaceElevated,
+                        border = BorderStroke(1.dp, StudioSurfaceBorder),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Grid Size: ${tm.cols} columns × ${tm.rows} rows", fontWeight = FontWeight.Bold, color = StudioTextPrimary)
+                            Text("Tile Size: ${tm.tileWidth.toInt()}×${tm.tileHeight.toInt()} px • Blocks Placed: ${tm.tiles.size}", fontSize = 12.sp, color = StudioTextSecondary)
+                            Text("Stamp tiles by selecting Tile Tool on the top bar.", fontSize = 11.sp, color = StudioAccentBlue)
+                        }
                     }
                 }
 
@@ -845,46 +786,18 @@ fun PropertySheet(
                 else -> {}
             }
         }
+        }
     }
 
-    // TileMap Resize Warning Dialog (Spec section 19)
-    if (showTileMapResizeWarning && obj.tileMap != null) {
-        val tm = obj.tileMap
-        AlertDialog(
-            onDismissRequest = { showTileMapResizeWarning = false },
-            title = { Text("Resize TileMap?") },
-            text = {
-                Text(
-                    "Changing the TileMap dimensions may affect or clip existing placed blocks. How would you like to proceed?",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        // Keep blocks & resize
-                        state.updateObject(obj.copy(tileMap = tm.copy(cols = pendingCols, rows = pendingRows)))
-                        showTileMapResizeWarning = false
-                    }
-                ) {
-                    Text("Keep Blocks & Resize")
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        onClick = {
-                            // Delete all blocks & resize
-                            state.updateObject(obj.copy(tileMap = tm.copy(cols = pendingCols, rows = pendingRows, tiles = emptyMap())))
-                            showTileMapResizeWarning = false
-                        }
-                    ) {
-                        Text("Clear All Blocks", color = StudioAccentRed)
-                    }
-                    TextButton(onClick = { showTileMapResizeWarning = false }) {
-                        Text("Cancel")
-                    }
-                }
+    if (activeNumberEdit != null) {
+        val (fieldLabel, onConfirm) = activeNumberEdit!!
+        NumberInputDialog(
+            title = "Edit $fieldLabel",
+            initialValue = activeNumberValue,
+            onDismiss = { activeNumberEdit = null },
+            onConfirm = { newVal ->
+                onConfirm(newVal)
+                activeNumberEdit = null
             }
         )
     }
@@ -911,16 +824,33 @@ private fun NumericPropertyField(
     modifier: Modifier = Modifier,
     onValueChange: (Float) -> Unit
 ) {
-    var text by remember(value) { mutableStateOf(if (value % 1.0f == 0.0f) value.toInt().toString() else String.format("%.1f", value)) }
+    val requester = LocalNumberKeypadRequester.current
+    val displayValue = if (value % 1.0f == 0.0f) value.toInt().toString() else String.format(java.util.Locale.US, "%.1f", value)
 
-    OutlinedTextField(
-        value = text,
-        onValueChange = {
-            text = it
-            it.toFloatOrNull()?.let(onValueChange)
-        },
-        label = { Text(label, fontSize = 11.sp) },
-        singleLine = true,
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = StudioSurfaceElevated,
+        border = BorderStroke(1.dp, StudioSurfaceBorder),
         modifier = modifier
-    )
+            .clip(RoundedCornerShape(8.dp))
+            .clickable {
+                requester(label, value, onValueChange)
+            }
+            .testTag("field_$label")
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                color = StudioTextSecondary
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = displayValue,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = StudioTextPrimary
+            )
+        }
+    }
 }

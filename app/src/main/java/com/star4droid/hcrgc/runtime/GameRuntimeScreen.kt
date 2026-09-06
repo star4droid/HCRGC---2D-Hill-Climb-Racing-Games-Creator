@@ -126,7 +126,17 @@ fun GameRuntimeScreen(
                         else -> 0f
                     }
 
-                    vc.update(dt, simContext.terrainSegments, simContext.staticBoxes)
+                    val obstacleBoxes = mutableListOf<FloatArray>()
+                    obstacleBoxes.addAll(simContext.staticBoxes)
+                    for (body in simContext.physicsWorld.bodies) {
+                        if (!body.isVehicleChassis && !body.isVehicleWheel && !body.isSensor) {
+                            val hw = body.width / 2f
+                            val hh = body.height / 2f
+                            obstacleBoxes.add(floatArrayOf(body.position.x - hw, body.position.y - hh, body.position.x + hw, body.position.y + hh))
+                        }
+                    }
+
+                    vc.update(dt, simContext.terrainSegments, obstacleBoxes)
                 }
 
                 // Step physics world (including all dynamic boxes, crates, circles)
@@ -306,7 +316,7 @@ fun GameRuntimeScreen(
                 }
 
                 // Chassis (Rotates naturally with terrain slope!)
-                val carObj = level.objects.find { it.type == ObjectType.CAR_BODY }
+                val carObj = simContext.cachedCarObj
                 val chassisPos = vc.chassis.position
                 val cx = chassisPos.x * zoom + offsetX
                 val cy = chassisPos.y * zoom + offsetY
@@ -324,7 +334,7 @@ fun GameRuntimeScreen(
                     }
 
                     // Attached Elements
-                    for (elem in level.objects.filter { it.parentId == carObj?.id && it.type == ObjectType.ELEMENT }) {
+                    for (elem in simContext.cachedAttachedElements) {
                         val relX = (elem.x - (carObj?.x ?: 0f)) * zoom
                         val relY = (elem.y - (carObj?.y ?: 0f)) * zoom
                         val ew = elem.width * zoom
@@ -342,7 +352,7 @@ fun GameRuntimeScreen(
 
             // 7. Ambient Lighting & Box2D Lights Layer
             val ambientIntensity = project.ambientLightIntensity.coerceIn(0f, 1f)
-            val lightObjects = level.objects.filter { it.type == ObjectType.LIGHT && it.light != null }
+            val lightObjects = simContext.cachedLights
 
             if (ambientIntensity < 0.96f || lightObjects.isNotEmpty()) {
                 val darknessAlpha = (1f - ambientIntensity).coerceIn(0f, 0.92f)
@@ -881,7 +891,9 @@ private data class SimulationContext(
     val cachedTileMaps: List<GameObject>,
     val cachedNonSpecialObjects: List<GameObject>,
     val cachedLights: List<GameObject>,
-    val cachedHudUiObjects: List<GameObject>
+    val cachedHudUiObjects: List<GameObject>,
+    val cachedCarObj: GameObject?,
+    val cachedAttachedElements: List<GameObject>
 )
 
 private fun setupSimulation(project: ProjectConfig, level: LevelData): SimulationContext {
@@ -1009,7 +1021,8 @@ private fun setupSimulation(project: ProjectConfig, level: LevelData): Simulatio
                 width = wObj.width,
                 height = wObj.height,
                 mass = wObj.physics.density * 2.5f,
-                friction = wObj.physics.friction
+                friction = wObj.physics.friction,
+                isVehicleWheel = true
             )
             world.addBody(wBody)
             WheelInstance(
@@ -1047,6 +1060,10 @@ private fun setupSimulation(project: ProjectConfig, level: LevelData): Simulatio
         it.visible && (it.type == ObjectType.UI_BUTTON || it.type == ObjectType.UI_TEXT || it.type == ObjectType.UI_PROGRESS_BAR)
     }
 
+    val attachedElements = if (carObj != null) {
+        level.objects.filter { it.parentId == carObj.id && it.type == ObjectType.ELEMENT }
+    } else emptyList()
+
     return SimulationContext(
         physicsWorld = world,
         vehicleController = vehicleCtrl,
@@ -1058,6 +1075,8 @@ private fun setupSimulation(project: ProjectConfig, level: LevelData): Simulatio
         cachedTileMaps = tileMaps,
         cachedNonSpecialObjects = nonSpecial,
         cachedLights = lights,
-        cachedHudUiObjects = hudUi
+        cachedHudUiObjects = hudUi,
+        cachedCarObj = carObj,
+        cachedAttachedElements = attachedElements
     )
 }

@@ -9,6 +9,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.star4droid.hcrgc.model.LevelData
 import com.star4droid.hcrgc.model.ProjectConfig
 import com.star4droid.hcrgc.storage.ProjectStorage
@@ -24,8 +27,23 @@ sealed interface Screen {
 }
 
 class MainActivity : ComponentActivity() {
+
+    private fun hideSystemBars() {
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController.hide(WindowInsetsCompat.Type.statusBars())
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        hideSystemBars()
         enableEdgeToEdge()
 
         setContent {
@@ -41,7 +59,8 @@ class MainActivity : ComponentActivity() {
                         is Screen.Projects -> {
                             ProjectsScreen(
                                 onOpenProject = { project ->
-                                    currentScreen = Screen.Levels(project)
+                                    val freshProject = storage.loadProject(project.id) ?: project
+                                    currentScreen = Screen.Levels(freshProject)
                                 }
                             )
                         }
@@ -52,9 +71,10 @@ class MainActivity : ComponentActivity() {
                                     currentScreen = Screen.Projects
                                 },
                                 onOpenLevel = { levelId ->
-                                    val level = storage.loadLevel(screen.project.id, levelId)
+                                    val freshProject = storage.loadProject(screen.project.id) ?: screen.project
+                                    val level = storage.loadLevel(freshProject.id, levelId)
                                     if (level != null) {
-                                        currentScreen = Screen.Editor(screen.project, level)
+                                        currentScreen = Screen.Editor(freshProject, level)
                                     }
                                 }
                             )
@@ -64,13 +84,21 @@ class MainActivity : ComponentActivity() {
                                 initialProject = screen.project,
                                 initialLevel = screen.level,
                                 onBackToLevels = {
-                                    currentScreen = Screen.Levels(screen.project)
+                                    val freshProject = storage.loadProject(screen.project.id) ?: screen.project
+                                    currentScreen = Screen.Levels(freshProject)
                                 }
                             )
                         }
                     }
                 }
             }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            hideSystemBars()
         }
     }
 }

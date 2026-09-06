@@ -35,7 +35,8 @@ class RigidBody(
     var restitution: Float = 0.2f,
     var isSensor: Boolean = false,
     var fixedRotation: Boolean = false,
-    var isVehicleChassis: Boolean = false
+    var isVehicleChassis: Boolean = false,
+    var isVehicleWheel: Boolean = false
 ) {
     val invMass: Float get() = if (isStatic || mass <= 0f) 0f else 1f / mass
     val invInertia: Float get() = if (isStatic || fixedRotation || inertia <= 0f) 0f else 1f / inertia
@@ -90,8 +91,16 @@ object CollisionHelper {
             val p1 = seg.first
             val p2 = seg.second
 
-            val minX = min(p1.x, p2.x) - 10f
-            val maxX = max(p1.x, p2.x) + 10f
+            val minX = if (p1.x < p2.x) p1.x else p2.x
+            val maxX = if (p1.x > p2.x) p1.x else p2.x
+            if (px < minX - proximityThreshold || px > maxX + proximityThreshold) {
+                continue
+            }
+            val minY = if (p1.y < p2.y) p1.y else p2.y
+            val maxY = if (p1.y > p2.y) p1.y else p2.y
+            if (py < minY - proximityThreshold || py > maxY + proximityThreshold) {
+                continue
+            }
 
             // Segment direction
             val dx = p2.x - p1.x
@@ -150,6 +159,49 @@ object CollisionHelper {
 
         return bestContact
     }
+
+    fun checkPointAgainstBox(
+        px: Float, py: Float,
+        bLeft: Float, bTop: Float, bRight: Float, bBottom: Float,
+        proximityThreshold: Float = 25f
+    ): TerrainContact? {
+        if (px < bLeft - proximityThreshold || px > bRight + proximityThreshold) return null
+        if (py < bTop - proximityThreshold || py > bBottom + proximityThreshold) return null
+
+        val nearestX = px.coerceIn(bLeft, bRight)
+        val nearestY = py.coerceIn(bTop, bBottom)
+
+        val distToTop = abs(py - bTop)
+        val distToBottom = abs(py - bBottom)
+        val distToLeft = abs(px - bLeft)
+        val distToRight = abs(px - bRight)
+
+        val minDist = minOf(distToTop, distToBottom, distToLeft, distToRight)
+
+        val (normal, surfacePt) = when (minDist) {
+            distToTop -> Pair(Vec2(0f, -1f), Vec2(nearestX, bTop))
+            distToLeft -> Pair(Vec2(-1f, 0f), Vec2(bLeft, nearestY))
+            distToRight -> Pair(Vec2(1f, 0f), Vec2(bRight, nearestY))
+            else -> Pair(Vec2(0f, 1f), Vec2(nearestX, bBottom))
+        }
+
+        val isInside = px in bLeft..bRight && py in bTop..bBottom
+        val penetration = if (isInside) (proximityThreshold + minDist) else (proximityThreshold - minDist)
+
+        if (penetration <= -proximityThreshold) return null
+
+        val tangent = Vec2(-normal.y, normal.x)
+        val forwardTangent = if (tangent.x >= 0f) tangent else Vec2(-tangent.x, -tangent.y)
+
+        return TerrainContact(
+            isContact = true,
+            penetration = penetration,
+            surfacePoint = surfacePt,
+            normal = normal,
+            tangent = forwardTangent,
+            slopeDegrees = 0f
+        )
+    }
 }
 
 class PhysicsWorld(
@@ -175,7 +227,7 @@ class PhysicsWorld(
         staticBoxes: List<FloatArray> = emptyList()
     ) {
         for (body in bodies) {
-            if (body.isStatic) continue
+            if (body.isStatic || body.isVehicleWheel) continue
 
             // Integrate gravity
             body.velocity.x += gravity.x * dt
@@ -273,7 +325,7 @@ class PhysicsWorld(
             val a = nonSensors[i]
             for (j in i + 1 until nonSensors.size) {
                 val b = nonSensors[j]
-                if (a.isStatic && b.isStatic) continue
+                if ((a.isStatic && b.isStatic) || a.isVehicleWheel || b.isVehicleWheel) continue
 
                 val aHalfW = a.width / 2f
                 val aHalfH = a.height / 2f

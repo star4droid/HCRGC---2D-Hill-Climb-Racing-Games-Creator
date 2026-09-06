@@ -111,6 +111,29 @@ fun EditorCanvas(
                     val (startWx, startWy) = state.screenToWorld(downPos.x, downPos.y)
                     val selObj = state.selectedObject
 
+                    // Hit-test topmost object under finger at down event
+                    val hitObj = state.level.objects
+                        .sortedByDescending { it.zIndex }
+                        .find { obj ->
+                            if (!obj.visible) return@find false
+                            if (!state.showUiElementsLayer && (obj.type == ObjectType.UI_BUTTON || obj.type == ObjectType.UI_TEXT || obj.type == ObjectType.UI_PROGRESS_BAR)) {
+                                return@find false
+                            }
+                            if (obj.type == ObjectType.CUSTOM_SHAPE && obj.customShape != null) {
+                                val pts = obj.customShape.points
+                                pts.any { p -> hypot(startWx - (obj.x + p.x), startWy - (obj.y + p.y)) < 40f / state.zoom }
+                            } else if (obj.type == ObjectType.TILEMAP && obj.tileMap != null) {
+                                val tw = obj.tileMap.cols * obj.tileMap.tileWidth
+                                val th = obj.tileMap.rows * obj.tileMap.tileHeight
+                                startWx in obj.x..(obj.x + tw) && startWy in obj.y..(obj.y + th)
+                            } else {
+                                val halfW = obj.width / 2f
+                                val halfH = obj.height / 2f
+                                startWx in (obj.x - halfW)..(obj.x + halfW) &&
+                                startWy in (obj.y - halfH)..(obj.y + halfH)
+                            }
+                        }
+
                     // Check if a point was touched in edit mode
                     var touchedPointIndex = -1
                     if (state.isEditingShapePoints && selObj?.type == ObjectType.CUSTOM_SHAPE && selObj.customShape != null) {
@@ -213,9 +236,27 @@ fun EditorCanvas(
                                     } else {
                                         activeDragMode = DragMode.PAN_WORLD
                                     }
+                                } else if ((state.transformMode == TransformMode.MOVE || state.activeTool == EditorTool.MOVE) && selObj != null) {
+                                    // Move mode explicitly drags the selected element
+                                    activeDragMode = DragMode.MOVE_OBJECT
+                                    state.pushUndoState()
+                                } else if (hitObj != null) {
+                                    // If user started dragging on an object, select it and move it
+                                    state.selectedObjectId = hitObj.id
+                                    activeDragMode = DragMode.MOVE_OBJECT
+                                    state.pushUndoState()
                                 } else if (selObj != null) {
-                                    when (state.transformMode) {
-                                        TransformMode.GRID -> {
+                                    when {
+                                        state.activeTool == EditorTool.ROTATE || state.transformMode == TransformMode.ROTATE -> {
+                                            activeDragMode = DragMode.ROTATE_OBJECT
+                                            state.pushUndoState()
+                                        }
+                                        state.activeTool == EditorTool.SCALE || state.transformMode == TransformMode.SCALE -> {
+                                            activeDragMode = DragMode.RESIZE_OBJECT
+                                            activeResizeHandle = 2
+                                            state.pushUndoState()
+                                        }
+                                        state.transformMode == TransformMode.GRID -> {
                                             if (touchedGizmoRotate) {
                                                 activeDragMode = DragMode.ROTATE_OBJECT
                                                 state.pushUndoState()
@@ -230,19 +271,8 @@ fun EditorCanvas(
                                                 activeDragMode = DragMode.PAN_WORLD
                                             }
                                         }
-                                        TransformMode.MOVE -> {
-                                            // MOVE mode explicitly drags the selected element
-                                            activeDragMode = DragMode.MOVE_OBJECT
-                                            state.pushUndoState()
-                                        }
-                                        TransformMode.ROTATE -> {
-                                            activeDragMode = DragMode.ROTATE_OBJECT
-                                            state.pushUndoState()
-                                        }
-                                        TransformMode.SCALE -> {
-                                            activeDragMode = DragMode.RESIZE_OBJECT
-                                            activeResizeHandle = 2
-                                            state.pushUndoState()
+                                        else -> {
+                                            activeDragMode = DragMode.PAN_WORLD
                                         }
                                     }
                                 } else {
@@ -277,7 +307,18 @@ fun EditorCanvas(
                                         if (curObj != null) {
                                             val newX = curObj.x + dx
                                             val newY = curObj.y + dy
-                                            state.updateObject(curObj.copy(x = newX, y = newY))
+                                            state.level = state.level.copy(
+                                                objects = state.level.objects.map { obj ->
+                                                    when {
+                                                        obj.id == curObj.id -> obj.copy(x = newX, y = newY)
+                                                        obj.parentId == curObj.id -> obj.copy(x = obj.x + dx, y = obj.y + dy)
+                                                        curObj.type == ObjectType.CAR_BODY && obj.type == ObjectType.WHEEL && obj.wheel?.carBodyId == curObj.id ->
+                                                            obj.copy(x = obj.x + dx, y = obj.y + dy)
+                                                        else -> obj
+                                                    }
+                                                }
+                                            )
+                                            state.onLevelModified()
                                         }
                                     }
                                     DragMode.ROTATE_OBJECT -> {
@@ -417,13 +458,15 @@ fun EditorCanvas(
                     .padding(16.dp),
                 contentAlignment = Alignment.TopEnd
             ) {
+                val penColor = if (state.isEditingShapePoints) Color(0xFF10B981) else Color(0xFF0284C7)
                 Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = if (state.isEditingShapePoints) StudioAccentOrange else StudioSurfaceElevated,
+                    shape = CircleShape,
+                    color = penColor,
                     tonalElevation = 8.dp,
                     shadowElevation = 8.dp,
-                    border = BorderStroke(2.dp, if (state.isEditingShapePoints) Color.White else StudioAccentOrange),
+                    border = BorderStroke(2.dp, Color.White),
                     modifier = Modifier
+                        .size(46.dp)
                         .testTag("shape_pen_edit_button")
                         .clickable {
                             state.isEditingShapePoints = !state.isEditingShapePoints
@@ -432,22 +475,15 @@ fun EditorCanvas(
                             }
                         }
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (state.isEditingShapePoints) Icons.Default.Close else Icons.Default.Edit,
-                            contentDescription = if (state.isEditingShapePoints) "Exit Shape Edit" else "Edit Shape Points",
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit Shape Points",
                             tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Text(
-                            text = if (state.isEditingShapePoints) "Exit Edit (X)" else "Pen Tool (Edit Points)",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -699,7 +735,7 @@ private fun DrawScope.drawStandardObject(state: EditorState, obj: GameObject, sx
                     val lightAlpha = (lp.intensity * 0.45f).coerceIn(0f, 1f)
                     val lightCol = Color(lp.color).copy(alpha = lightAlpha)
                     when (lp.lightType) {
-                        LightType.POINT, LightType.CONE -> {
+                        LightType.POINT -> {
                             drawCircle(
                                 brush = Brush.radialGradient(
                                     listOf(lightCol, Color.Transparent),
@@ -710,17 +746,71 @@ private fun DrawScope.drawStandardObject(state: EditorState, obj: GameObject, sx
                                 center = Offset(sx, sy)
                             )
                         }
-                        LightType.DIRECTIONAL, LightType.CHAIN -> {
-                            val startY = sy - (lightDist * 0.5f)
-                            val endY = sy + (lightDist * 0.5f)
+                        LightType.CONE -> {
+                            val dirRad = Math.toRadians((lp.direction + obj.rotation).toDouble())
+                            val halfConeRad = Math.toRadians((lp.coneAngle / 2f).toDouble())
+                            val p1x = (sx + lightDist * kotlin.math.cos(dirRad - halfConeRad)).toFloat()
+                            val p1y = (sy + lightDist * kotlin.math.sin(dirRad - halfConeRad)).toFloat()
+                            val p2x = (sx + lightDist * kotlin.math.cos(dirRad + halfConeRad)).toFloat()
+                            val p2y = (sy + lightDist * kotlin.math.sin(dirRad + halfConeRad)).toFloat()
+
+                            val conePath = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(sx, sy)
+                                lineTo(p1x, p1y)
+                                lineTo(p2x, p2y)
+                                close()
+                            }
+                            drawPath(
+                                path = conePath,
+                                brush = Brush.radialGradient(
+                                    listOf(lightCol, Color.Transparent),
+                                    center = Offset(sx, sy),
+                                    radius = lightDist
+                                )
+                            )
+                            drawPath(
+                                path = conePath,
+                                color = lightCol,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                            )
+                        }
+                        LightType.DIRECTIONAL -> {
+                            val dirRad = Math.toRadians((lp.direction + obj.rotation).toDouble())
+                            val nx = (-kotlin.math.sin(dirRad)).toFloat()
+                            val ny = (kotlin.math.cos(dirRad)).toFloat()
+                            val beamWidth = lightDist * 0.6f
+                            val startLeft = Offset(sx + nx * beamWidth, sy + ny * beamWidth)
+                            val startRight = Offset(sx - nx * beamWidth, sy - ny * beamWidth)
+                            val endLeft = Offset(startLeft.x + (lightDist * kotlin.math.cos(dirRad)).toFloat(), startLeft.y + (lightDist * kotlin.math.sin(dirRad)).toFloat())
+                            val endRight = Offset(startRight.x + (lightDist * kotlin.math.cos(dirRad)).toFloat(), startRight.y + (lightDist * kotlin.math.sin(dirRad)).toFloat())
+
+                            val dirPath = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(startLeft.x, startLeft.y)
+                                lineTo(startRight.x, startRight.y)
+                                lineTo(endRight.x, endRight.y)
+                                lineTo(endLeft.x, endLeft.y)
+                                close()
+                            }
+                            drawPath(dirPath, color = lightCol.copy(alpha = lightAlpha * 0.7f))
+                            drawPath(dirPath, color = lightCol, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f))
+                        }
+                        LightType.CHAIN -> {
+                            val startY = sy - (lightDist * 0.25f)
+                            val endY = sy + (lightDist * 0.25f)
                             drawRect(
                                 brush = Brush.verticalGradient(
-                                    listOf(lightCol, Color.Transparent),
+                                    listOf(Color.Transparent, lightCol, Color.Transparent),
                                     startY = startY,
                                     endY = endY
                                 ),
                                 topLeft = Offset(sx - lightDist, startY),
-                                size = Size(lightDist * 2f, lightDist)
+                                size = Size(lightDist * 2f, lightDist * 0.5f)
+                            )
+                            drawLine(
+                                color = lightCol,
+                                start = Offset(sx - lightDist, sy),
+                                end = Offset(sx + lightDist, sy),
+                                strokeWidth = 2.5f
                             )
                         }
                     }
@@ -894,6 +984,16 @@ private fun DrawScope.drawTileMapObject(state: EditorState, obj: GameObject, sx:
         }
     }
 
+    // Thin square around the entire map
+    val totalWidth = tm.cols * tw
+    val totalHeight = tm.rows * th
+    drawRect(
+        color = Color(0xFF64748B),
+        topLeft = Offset(sx, sy),
+        size = Size(totalWidth, totalHeight),
+        style = Stroke(width = 1.5f)
+    )
+
     if (state.selectedObjectId == obj.id) {
         for (c in 0..tm.cols) {
             val lx = sx + c * tw
@@ -913,8 +1013,8 @@ private fun DrawScope.drawSelectionGizmos(state: EditorState, obj: GameObject, p
     val hw = sw / 2f
     val hh = sh / 2f
 
-    // 1. Standard Object Gizmo (when not editing shape points)
-    if (obj.type != ObjectType.CUSTOM_SHAPE) {
+    // 1. Standard Object Gizmo (when not editing shape points and not TileMap)
+    if (obj.type != ObjectType.CUSTOM_SHAPE && obj.type != ObjectType.TILEMAP) {
         rotate(obj.rotation, pivot = Offset(sx, sy)) {
             drawRoundRect(
                 color = CanvasSelection,

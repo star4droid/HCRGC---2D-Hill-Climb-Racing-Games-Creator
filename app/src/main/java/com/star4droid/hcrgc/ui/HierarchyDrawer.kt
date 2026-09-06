@@ -46,27 +46,30 @@ fun HierarchyDrawer(
         border = BorderStroke(1.dp, StudioSurfaceBorder)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header
+            // Compact Header with minimal padding and smaller title
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AccountTree, contentDescription = null, tint = StudioAccentBlue)
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(Icons.Default.AccountTree, contentDescription = null, tint = StudioAccentBlue, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Scene Hierarchy",
-                        style = MaterialTheme.typography.titleMedium,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = StudioTextPrimary
                     )
                 }
 
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = StudioTextSecondary)
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.size(22.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = StudioTextSecondary, modifier = Modifier.size(13.dp))
                 }
             }
 
@@ -87,7 +90,7 @@ fun HierarchyDrawer(
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(vertical = 4.dp)
+                    .padding(vertical = 2.dp)
             ) {
                 // --- UI ELEMENTS LAYER SECTION ---
                 item {
@@ -95,16 +98,16 @@ fun HierarchyDrawer(
                         color = StudioSurfaceElevated,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .clip(RoundedCornerShape(6.dp))
                             .clickable { uiLayerExpanded = !uiLayerExpanded },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         border = BorderStroke(1.dp, StudioSurfaceBorder)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -113,36 +116,36 @@ fun HierarchyDrawer(
                                     imageVector = if (uiLayerExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
                                     contentDescription = null,
                                     tint = StudioAccentBlue,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(13.dp)
                                 )
+                                Spacer(Modifier.width(3.dp))
+                                Icon(Icons.Default.Layers, contentDescription = null, tint = StudioAccentBlue, modifier = Modifier.size(13.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Icon(Icons.Default.Layers, contentDescription = null, tint = StudioAccentBlue, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("UI Elements Layer", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StudioTextPrimary)
-                                Spacer(Modifier.width(6.dp))
+                                Text("UI Elements Layer", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = StudioTextPrimary)
+                                Spacer(Modifier.width(4.dp))
                                 Surface(
                                     color = StudioAccentBlue.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(4.dp)
+                                    shape = RoundedCornerShape(3.dp)
                                 ) {
                                     Text(
                                         "${uiObjects.size}",
-                                        fontSize = 10.sp,
+                                        fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = StudioAccentBlue,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 0.dp)
                                     )
                                 }
                             }
 
                             IconButton(
                                 onClick = { state.showUiElementsLayer = !state.showUiElementsLayer },
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             ) {
                                 Icon(
                                     imageVector = if (state.showUiElementsLayer) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                     contentDescription = "Toggle UI Elements Layer",
                                     tint = if (state.showUiElementsLayer) StudioAccentBlue else StudioTextTertiary,
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(13.dp)
                                 )
                             }
                         }
@@ -193,16 +196,16 @@ fun HierarchyDrawer(
                         color = StudioSurfaceElevated,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .clip(RoundedCornerShape(6.dp))
                             .clickable { worldLayerExpanded = !worldLayerExpanded },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         border = BorderStroke(1.dp, StudioSurfaceBorder)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -211,23 +214,23 @@ fun HierarchyDrawer(
                                     imageVector = if (worldLayerExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
                                     contentDescription = null,
                                     tint = StudioAccentIndigo,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(13.dp)
                                 )
+                                Spacer(Modifier.width(3.dp))
+                                Icon(Icons.Default.Public, contentDescription = null, tint = StudioAccentIndigo, modifier = Modifier.size(13.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Icon(Icons.Default.Public, contentDescription = null, tint = StudioAccentIndigo, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Scene Elements", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StudioTextPrimary)
-                                Spacer(Modifier.width(6.dp))
+                                Text("Scene Elements", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = StudioTextPrimary)
+                                Spacer(Modifier.width(4.dp))
                                 Surface(
                                     color = StudioAccentIndigo.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(4.dp)
+                                    shape = RoundedCornerShape(3.dp)
                                 ) {
                                     Text(
                                         "${worldObjects.size}",
-                                        fontSize = 10.sp,
+                                        fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = StudioAccentIndigo,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 0.dp)
                                     )
                                 }
                             }
@@ -399,23 +402,23 @@ private fun HierarchyItemRow(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 1.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 1.dp)
+            .clip(RoundedCornerShape(4.dp))
             .clickable(onClick = onSelect)
             .testTag("hierarchy_item_${obj.id}"),
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(4.dp),
         color = if (isSelected) StudioAccentBlue.copy(alpha = 0.12f) else StudioSurface,
         border = if (isSelected) BorderStroke(1.dp, StudioAccentBlue) else null
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .defaultMinSize(minHeight = 36.dp)
+                .defaultMinSize(minHeight = 28.dp)
                 .padding(
-                    start = if (isChild) 22.dp else 6.dp,
-                    end = 4.dp,
-                    top = 2.dp,
-                    bottom = 2.dp
+                    start = if (isChild) 16.dp else 4.dp,
+                    end = 2.dp,
+                    top = 1.dp,
+                    bottom = 1.dp
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -424,15 +427,15 @@ private fun HierarchyItemRow(
                     imageVector = Icons.Default.SubdirectoryArrowRight,
                     contentDescription = "Child",
                     tint = StudioAccentIndigo,
-                    modifier = Modifier.size(13.dp)
+                    modifier = Modifier.size(11.dp)
                 )
-                Spacer(modifier = Modifier.width(3.dp))
+                Spacer(modifier = Modifier.width(2.dp))
             }
 
             // Compact Type Icon Box
             Box(
                 modifier = Modifier
-                    .size(22.dp)
+                    .size(18.dp)
                     .background(
                         when (obj.type) {
                             ObjectType.CAR_BODY, ObjectType.WHEEL -> StudioAccentOrange.copy(alpha = 0.15f)
@@ -442,7 +445,7 @@ private fun HierarchyItemRow(
                             ObjectType.ELEMENT -> StudioAccentIndigo.copy(alpha = 0.15f)
                             else -> StudioSurfaceBorder
                         },
-                        RoundedCornerShape(4.dp)
+                        RoundedCornerShape(3.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -463,24 +466,29 @@ private fun HierarchyItemRow(
                     },
                     contentDescription = null,
                     tint = StudioTextPrimary,
-                    modifier = Modifier.size(13.dp)
+                    modifier = Modifier.size(11.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(4.dp))
 
-            // Name & Compact Info
-            Column(modifier = Modifier.weight(1f)) {
+            // Name & Compact Info on single line to maximize vertical density
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
                     text = obj.name,
                     fontSize = 11.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     color = if (isSelected) StudioAccentBlue else StudioTextPrimary,
-                    maxLines = 1
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "${obj.type.name} • Z:${obj.zIndex}",
-                    fontSize = 9.sp,
+                    text = "Z:${obj.zIndex}",
+                    fontSize = 8.5.sp,
                     color = StudioTextSecondary,
                     maxLines = 1
                 )
@@ -489,13 +497,13 @@ private fun HierarchyItemRow(
             // Compact Visibility Button
             IconButton(
                 onClick = onToggleVisible,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             ) {
                 Icon(
                     imageVector = if (obj.visible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                     contentDescription = "Toggle Visibility",
                     tint = if (obj.visible) StudioTextSecondary else StudioTextTertiary,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(12.dp)
                 )
             }
 
@@ -503,13 +511,13 @@ private fun HierarchyItemRow(
             Box {
                 IconButton(
                     onClick = { menuExpanded = true },
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(20.dp)
                 ) {
                     Icon(
                         Icons.Default.MoreVert,
                         contentDescription = "Menu",
                         tint = StudioTextSecondary,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(12.dp)
                     )
                 }
 

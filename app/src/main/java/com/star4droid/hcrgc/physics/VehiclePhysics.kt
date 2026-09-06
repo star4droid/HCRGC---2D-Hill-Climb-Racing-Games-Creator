@@ -24,7 +24,7 @@ class VehicleController(
     fun update(
         dt: Float,
         terrainSegments: List<Pair<Vec2, Vec2>>,
-        staticBoxes: List<FloatArray> // [left, top, right, bottom]
+        obstacleBoxes: List<FloatArray> // [left, top, right, bottom]
     ) {
         val rad = chassis.rotation * (Math.PI / 180f).toFloat()
         val cosRot = cos(rad)
@@ -38,116 +38,107 @@ class VehicleController(
             val anchorX = chassis.position.x + (wheel.initialOffset.x * cosRot - wheel.initialOffset.y * sinRot)
             val anchorY = chassis.position.y + (wheel.initialOffset.x * sinRot + wheel.initialOffset.y * cosRot)
 
-            val wheelRadius = wheel.config.radius
+            val wheelRadius = wheel.config.radius.coerceAtLeast(16f)
             val restLength = wheelRadius * 0.95f
 
-            // 1. Check terrain contact
-            val terrainContact = CollisionHelper.checkPointAgainstTerrain(
-                anchorX, anchorY, terrainSegments, proximityThreshold = restLength * 1.8f
-            )
+            // 1. Check terrain segment contact
+            val terrainContact = if (terrainSegments.isNotEmpty()) {
+                CollisionHelper.checkPointAgainstTerrain(
+                    anchorX, anchorY, terrainSegments, proximityThreshold = restLength * 1.75f
+                )
+            } else null
 
-            // 2. Check static box contact
-            var boxContact: TerrainContact? = null
-            for (box in staticBoxes) {
-                val bLeft = box[0]
-                val bTop = box[1]
-                val bRight = box[2]
-                val bBottom = box[3]
-
-                val nearestX = anchorX.coerceIn(bLeft, bRight)
-                val nearestY = anchorY.coerceIn(bTop, bBottom)
-                val dist = hypot(anchorX - nearestX, anchorY - nearestY)
-
-                if (dist < restLength * 1.5f) {
-                    val diffX = anchorX - nearestX
-                    val diffY = anchorY - nearestY
-                    val norm = if (dist > 0.001f) Vec2(diffX / dist, diffY / dist) else Vec2(0f, -1f)
-                    val penetration = (restLength - dist)
-                    boxContact = TerrainContact(
-                        isContact = true,
-                        penetration = penetration,
-                        surfacePoint = Vec2(nearestX, nearestY),
-                        normal = norm,
-                        tangent = Vec2(-norm.y, norm.x),
-                        slopeDegrees = 0f
-                    )
-                    break
+            // 2. Check static/dynamic box contacts (Boxes, Crates, Platforms)
+            var bestBoxContact: TerrainContact? = null
+            for (box in obstacleBoxes) {
+                val bContact = CollisionHelper.checkPointAgainstBox(
+                    anchorX, anchorY,
+                    bLeft = box[0], bTop = box[1], bRight = box[2], bBottom = box[3],
+                    proximityThreshold = restLength * 1.75f
+                )
+                if (bContact != null) {
+                    if (bestBoxContact == null || bContact.surfacePoint.y < bestBoxContact.surfacePoint.y) {
+                        bestBoxContact = bContact
+                    }
                 }
             }
 
-            val contact = terrainContact ?: boxContact
+            // Pick the best contact: prioritize the higher surface (smaller Y in screen coords)
+            val contact = when {
+                terrainContact != null && bestBoxContact != null -> {
+                    if (bestBoxContact.surfacePoint.y < terrainContact.surfacePoint.y) bestBoxContact else terrainContact
+                }
+                bestBoxContact != null -> bestBoxContact
+                else -> terrainContact
+            }
 
             if (contact != null && contact.penetration > -restLength * 1.35f) {
                 wheel.isGrounded = true
                 anyWheelGrounded = true
                 groundTractionCount++
 
-                val compression = (contact.penetration + restLength).coerceAtLeast(0f)
+                val compression = (contact.penetration + restLength).coerceIn(0f, restLength * 1.6f)
                 wheel.suspensionCompression = compression
 
-                // Smooth spring force (no violent bouncing)
-                val springK = wheel.config.suspensionFrequency * 2200f
+                // Spring & damper force along contact normal
+                val springK = wheel.config.suspensionFrequency * 3200f
                 val springForceMag = compression * springK
 
-                // Damping along contact normal
                 val relVel = chassis.velocity.dot(contact.normal)
-                val damping = wheel.config.suspensionDamping * 160f * relVel
+                val damping = wheel.config.suspensionDamping * 220f * relVel
                 val totalNormalForce = (springForceMag - damping).coerceAtLeast(0f)
 
                 val normalForce = contact.normal * totalNormalForce
 
-                // Apply linear force to chassis
+                // Apply normal force to chassis
                 chassis.applyForce(normalForce, dt)
 
-                // Rotational torque to chassis from wheel position
+                // Rotational torque from suspension push
                 val rx = anchorX - chassis.position.x
                 val ry = anchorY - chassis.position.y
                 val torque = rx * normalForce.y - ry * normalForce.x
-                chassis.applyTorque(torque * 0.85f, dt)
+                chassis.applyTorque(torque * 0.75f, dt)
 
-                // Smooth anti-penetration resolution if wheel is deep inside terrain
-                if (contact.penetration > 2f) {
-                    val pushAmount = min(contact.penetration * 0.25f, 6f)
+                // Anti-penetration position correction
+                if (contact.penetration > 1.5f) {
+                    val pushAmount = min(contact.penetration * 0.35f, 5f)
                     chassis.position.x += contact.normal.x * pushAmount
                     chassis.position.y += contact.normal.y * pushAmount
                 }
 
-                // Surface tangent & propulsion
+                // Surface tangent & vehicle drive force
                 val forwardTangent = if (contact.tangent.x >= 0f) contact.tangent else Vec2(-contact.tangent.x, -contact.tangent.y)
                 val tangentVel = chassis.velocity.dot(forwardTangent)
-                val driveScale = carConfig.enginePower * 2800f
+                val driveScale = (carConfig.enginePower.coerceAtLeast(0.6f)) * 9000f
 
                 if (throttle > 0f) {
-                    // GAS: Continuous forward acceleration up to max speed
-                    if (tangentVel < 1000f) {
-                        // Uphill torque boost: if climbing, provide extra torque so car doesn't get stuck
-                        val uphillFactor = if (forwardTangent.y < -0.1f) 1.5f else 1.0f
+                    // Gas: continuous responsive forward acceleration
+                    if (tangentVel < 1200f) {
+                        val uphillFactor = 1.0f + (-forwardTangent.y * 1.4f).coerceAtLeast(0f)
                         val driveForce = forwardTangent * (throttle * driveScale * uphillFactor)
                         chassis.applyForce(driveForce, dt)
                     }
                 } else if (throttle < 0f) {
-                    // BRAKE / REVERSE
-                    if (tangentVel > 20f) {
-                        // Strong active braking when moving forward
-                        val brakeForce = forwardTangent * (throttle * driveScale * 2.2f)
+                    // Brake / Reverse
+                    if (tangentVel > 25f) {
+                        val brakeForce = forwardTangent * (-min(tangentVel * 22f, 26000f))
                         chassis.applyForce(brakeForce, dt)
-                    } else if (tangentVel > -400f) {
-                        // Reverse drive when stopped or moving backward
-                        val reverseForce = forwardTangent * (throttle * driveScale * 0.75f)
-                        chassis.applyForce(reverseForce, dt)
+                    } else if (tangentVel > -450f) {
+                        val revForce = forwardTangent * (throttle * driveScale * 0.7f)
+                        chassis.applyForce(revForce, dt)
                     }
                 } else {
-                    // Neutral / Coasting: slight rolling friction
-                    if (abs(tangentVel) > 5f) {
-                        val rollFriction = forwardTangent * (-sign(tangentVel) * 150f)
+                    // Natural coasting friction
+                    if (abs(tangentVel) > 4f) {
+                        val rollFriction = forwardTangent * (-sign(tangentVel) * 120f)
                         chassis.applyForce(rollFriction, dt)
                     }
                 }
 
-                // WHEEL PHYSICAL ROLLING ROTATION:
+                // Wheel physical rolling rotation
                 wheel.body.angularVelocity = (tangentVel / wheelRadius) * (180f / Math.PI.toFloat())
 
-                // Position wheel visually along suspension travel
+                // Wheel visual placement along suspension compression
                 val extension = (restLength - compression).coerceAtLeast(0f)
                 wheel.body.position.x = anchorX - contact.normal.x * extension
                 wheel.body.position.y = anchorY - contact.normal.y * extension
@@ -155,16 +146,16 @@ class VehicleController(
                 wheel.isGrounded = false
                 wheel.suspensionCompression = 0f
 
-                // Wheel follows suspension extended in air
+                // In air: wheel extends naturally from car chassis
                 val uncompressedX = anchorX - (restLength * sinRot)
                 val uncompressedY = anchorY + (restLength * cosRot)
                 wheel.body.position.x = uncompressedX
                 wheel.body.position.y = uncompressedY
                 wheel.body.velocity = chassis.velocity
 
-                // Spin wheel freely with throttle input
+                // Spin wheel freely in air with throttle input
                 if (throttle != 0f) {
-                    wheel.body.angularVelocity += throttle * 550f * dt
+                    wheel.body.angularVelocity += throttle * 600f * dt
                 }
             }
 
@@ -173,27 +164,35 @@ class VehicleController(
         }
 
         // 2. Chassis Bumper Collisions with terrain
-        val bumperHalfW = 45f
+        val bumperHalfW = (chassis.width * 0.45f).coerceAtLeast(35f)
         val frontBumperX = chassis.position.x + bumperHalfW * cosRot
-        val frontBumperY = chassis.position.y + bumperHalfW * sinRot + 8f
-        val frontBumperContact = CollisionHelper.checkPointAgainstTerrain(frontBumperX, frontBumperY, terrainSegments, 12f)
-        if (frontBumperContact != null && frontBumperContact.penetration > 0f) {
-            chassis.position.y += frontBumperContact.normal.y * min(frontBumperContact.penetration * 0.3f, 5f)
-            chassis.applyTorque(-6000f, dt)
+        val frontBumperY = chassis.position.y + bumperHalfW * sinRot + 6f
+        val frontBumperContact = if (terrainSegments.isNotEmpty()) {
+            CollisionHelper.checkPointAgainstTerrain(frontBumperX, frontBumperY, terrainSegments, 14f)
+        } else null
+        if (frontBumperContact != null && frontBumperContact.penetration > 2f) {
+            val push = min(frontBumperContact.penetration * 0.4f, 6f)
+            chassis.position.x += frontBumperContact.normal.x * push
+            chassis.position.y += frontBumperContact.normal.y * push
+            chassis.velocity.x *= 0.94f
         }
 
         val rearBumperX = chassis.position.x - bumperHalfW * cosRot
-        val rearBumperY = chassis.position.y - bumperHalfW * sinRot + 8f
-        val rearBumperContact = CollisionHelper.checkPointAgainstTerrain(rearBumperX, rearBumperY, terrainSegments, 12f)
-        if (rearBumperContact != null && rearBumperContact.penetration > 0f) {
-            chassis.position.y += rearBumperContact.normal.y * min(rearBumperContact.penetration * 0.3f, 5f)
-            chassis.applyTorque(6000f, dt)
+        val rearBumperY = chassis.position.y - bumperHalfW * sinRot + 6f
+        val rearBumperContact = if (terrainSegments.isNotEmpty()) {
+            CollisionHelper.checkPointAgainstTerrain(rearBumperX, rearBumperY, terrainSegments, 14f)
+        } else null
+        if (rearBumperContact != null && rearBumperContact.penetration > 2f) {
+            val push = min(rearBumperContact.penetration * 0.4f, 6f)
+            chassis.position.x += rearBumperContact.normal.x * push
+            chassis.position.y += rearBumperContact.normal.y * push
+            chassis.velocity.x *= 0.94f
         }
 
-        // 3. Chassis Collisions with Static Boxes (Walls, hurdles, platforms)
+        // 3. Chassis Collisions with Obstacle Boxes (Walls, hurdles, crates, platforms)
         val cHalfW = chassis.width / 2f
         val cHalfH = chassis.height / 2f
-        for (box in staticBoxes) {
+        for (box in obstacleBoxes) {
             val bLeft = box[0]
             val bTop = box[1]
             val bRight = box[2]
@@ -209,41 +208,38 @@ class VehicleController(
                 val overlapY = min(oBottom - bTop, bBottom - oTop)
 
                 if (overlapX < overlapY) {
-                    if (chassis.position.x < (bLeft + bRight) / 2f) {
-                        chassis.position.x -= overlapX
-                        if (chassis.velocity.x > 0f) chassis.velocity.x = -chassis.velocity.x * 0.2f
-                    } else {
-                        chassis.position.x += overlapX
-                        if (chassis.velocity.x < 0f) chassis.velocity.x = -chassis.velocity.x * 0.2f
+                    val sign = if (chassis.position.x < (bLeft + bRight) / 2f) -1f else 1f
+                    chassis.position.x += sign * overlapX
+                    if (chassis.velocity.x * sign < 0f) {
+                        chassis.velocity.x = 0f
                     }
                 } else {
-                    if (chassis.position.y < (bTop + bBottom) / 2f) {
-                        chassis.position.y -= overlapY
-                        if (chassis.velocity.y > 0f) chassis.velocity.y = 0f
-                    } else {
-                        chassis.position.y += overlapY
-                        if (chassis.velocity.y < 0f) chassis.velocity.y = 0f
+                    val sign = if (chassis.position.y < (bTop + bBottom) / 2f) -1f else 1f
+                    chassis.position.y += sign * overlapY
+                    if (chassis.velocity.y * sign < 0f) {
+                        chassis.velocity.y = 0f
                     }
                 }
             }
         }
 
-        // 4. In-Air Controls (Gas tilts back, Brake tilts forward, plus manual tilt buttons)
+        // 4. In-Air Tilt Controls
         if (!anyWheelGrounded) {
+            val airControlRate = carConfig.airControl.coerceAtLeast(0.5f)
             val airTorque = when {
-                airTilt != 0f -> airTilt * carConfig.airControl * 14000f
-                throttle > 0f -> -throttle * carConfig.airControl * 9000f // Gas pitches up/back
-                throttle < 0f -> -throttle * carConfig.airControl * 9000f // Brake pitches down/forward
+                airTilt != 0f -> airTilt * airControlRate * 16000f
+                throttle > 0f -> -throttle * airControlRate * 10500f // Gas pitches up/back
+                throttle < 0f -> -throttle * airControlRate * 10500f // Brake pitches down/forward
                 else -> 0f
             }
             if (airTorque != 0f) {
                 chassis.applyTorque(airTorque, dt)
             }
         } else if (airTilt != 0f) {
-            chassis.applyTorque(airTilt * carConfig.airControl * 8000f, dt)
+            chassis.applyTorque(airTilt * carConfig.airControl * 9000f, dt)
         }
 
-        // 5. Ground stability assistance (smooth natural settling on slopes)
+        // 5. Ground stability assistance
         if (groundTractionCount > 0) {
             chassis.angularVelocity *= 0.94f
         }

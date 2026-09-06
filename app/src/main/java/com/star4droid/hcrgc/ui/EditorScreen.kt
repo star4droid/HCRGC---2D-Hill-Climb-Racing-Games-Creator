@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.star4droid.hcrgc.assets.VectorSprites
@@ -73,14 +74,15 @@ fun EditorScreen(
     }
 
     // Editor State
+    var editorStateHolder by remember { mutableStateOf<EditorState?>(null) }
     val editorState = remember {
         EditorState(
-            project = currentProject,
-            level = initialLevel,
+            initialProject = currentProject,
+            initialLevel = initialLevel,
             onLevelModified = {
-                // Auto-save level
+                editorStateHolder?.let { storage.saveLevel(currentProject.id, it.level) }
             }
-        )
+        ).also { editorStateHolder = it }
     }
 
     // Auto-save when level changes
@@ -112,233 +114,245 @@ fun EditorScreen(
                     shadowElevation = 4.dp,
                     border = BorderStroke(1.dp, StudioSurfaceBorder)
                 ) {
-                    Column {
-                        // Tier 1: Navigation, Level info, Tools & Dedicated Game Play Button
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                    // Single horizontally scrollable top bar with all tools & prominent play button
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // Back button
+                        IconButton(
+                            onClick = onBackToLevels,
+                            modifier = Modifier.size(34.dp).testTag("btn_back_levels")
                         ) {
-                            // Back button + Level Title
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(
-                                    onClick = onBackToLevels,
-                                    modifier = Modifier.testTag("btn_back_levels")
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = StudioTextPrimary)
-                                }
-                                Column(modifier = Modifier.padding(start = 4.dp)) {
-                                    Text(
-                                        text = editorState.level.name,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = StudioTextPrimary
-                                    )
-                                    Text(
-                                        text = "${currentProject.name} • ${currentProject.orientation.name}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = StudioTextSecondary
-                                    )
-                                }
-                            }
-
-                            // Right tools: Snap, Hierarchy, Assets, Library, Settings + GAMEPAD PLAY BUTTON
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                IconButton(
-                                    onClick = { editorState.snapToGrid = !editorState.snapToGrid }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Grid4x4,
-                                        contentDescription = "Snap Grid",
-                                        tint = if (editorState.snapToGrid) StudioAccentBlue else StudioTextTertiary
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = { showHierarchyDrawer = !showHierarchyDrawer },
-                                    modifier = Modifier.testTag("btn_hierarchy")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AccountTree,
-                                        contentDescription = "Hierarchy",
-                                        tint = if (showHierarchyDrawer) StudioAccentBlue else StudioTextPrimary
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = { showAssetManagerSheet = true },
-                                    modifier = Modifier.testTag("btn_assets")
-                                ) {
-                                    Icon(Icons.Default.Folder, contentDescription = "Assets", tint = StudioTextPrimary)
-                                }
-
-                                IconButton(
-                                    onClick = { showLibrarySheet = true },
-                                    modifier = Modifier.testTag("btn_library")
-                                ) {
-                                    Icon(Icons.Default.BookmarkBorder, contentDescription = "Library", tint = StudioTextPrimary)
-                                }
-
-                                IconButton(
-                                    onClick = { showProjectSettings = true },
-                                    modifier = Modifier.testTag("btn_settings")
-                                ) {
-                                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = StudioTextPrimary)
-                                }
-
-                                Spacer(Modifier.width(4.dp))
-
-                                // Unmistakable Game Controller Play button
-                                Button(
-                                    onClick = { isPlayMode = true },
-                                    modifier = Modifier.testTag("btn_play_game"),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = StudioAccentGreen),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(Icons.Default.SportsEsports, contentDescription = "Play", modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("PLAY", fontWeight = FontWeight.Black, fontSize = 13.sp)
-                                }
-                            }
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = StudioTextPrimary, modifier = Modifier.size(20.dp))
                         }
 
-                        HorizontalDivider(color = StudioSurfaceBorder, thickness = 1.dp)
-
-                        // Tier 2: Quick Toolbar with Undo/Redo, Transform Modes, and Zoom
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        // Compact Level Title badge
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = StudioSurfaceElevated,
+                            modifier = Modifier.padding(end = 4.dp)
                         ) {
-                            // Undo / Redo
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(
-                                    onClick = { editorState.undo() },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", tint = StudioTextPrimary, modifier = Modifier.size(18.dp))
-                                }
-                                IconButton(
-                                    onClick = { editorState.redo() },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", tint = StudioTextPrimary, modifier = Modifier.size(18.dp))
-                                }
-                            }
+                            Text(
+                                text = editorState.level.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = StudioTextPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
 
-                            VerticalDivider(modifier = Modifier.height(20.dp), color = StudioSurfaceBorder)
+                        // PROMINENT PLAY BUTTON - Placed right upfront so it's always easy to click!
+                        Button(
+                            onClick = { isPlayMode = true },
+                            modifier = Modifier.height(34.dp).testTag("btn_play_game"),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = StudioAccentGreen),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(18.dp), tint = Color.Black)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("PLAY", fontWeight = FontWeight.Black, fontSize = 12.sp, color = Color.Black)
+                        }
 
-                            // Transform Mode Segmented Chips
-                            Text("MODE:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = StudioTextSecondary)
-                            TransformMode.values().forEach { mode ->
-                                val isSelected = (editorState.transformMode == mode)
-                                val icon = when (mode) {
-                                    TransformMode.GRID -> Icons.Default.Grid4x4
-                                    TransformMode.MOVE -> Icons.Default.OpenWith
-                                    TransformMode.ROTATE -> Icons.Default.RotateRight
-                                    TransformMode.SCALE -> Icons.Default.AspectRatio
-                                }
-                                val label = when (mode) {
-                                    TransformMode.GRID -> "Grid"
-                                    TransformMode.MOVE -> "Move"
-                                    TransformMode.ROTATE -> "Rotate"
-                                    TransformMode.SCALE -> "Scale"
-                                }
+                        VerticalDivider(modifier = Modifier.height(20.dp), color = StudioSurfaceBorder)
 
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = { editorState.transformMode = mode },
-                                    leadingIcon = {
-                                        Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    },
-                                    label = { Text(label, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                                    modifier = Modifier.height(32.dp)
-                                )
-                            }
+                        // Snap to grid
+                        IconButton(
+                            onClick = { editorState.snapToGrid = !editorState.snapToGrid },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Grid4x4,
+                                contentDescription = "Snap Grid",
+                                tint = if (editorState.snapToGrid) StudioAccentBlue else StudioTextTertiary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
 
-                            VerticalDivider(modifier = Modifier.height(20.dp), color = StudioSurfaceBorder)
+                        // Hierarchy Drawer toggle
+                        IconButton(
+                            onClick = { showHierarchyDrawer = !showHierarchyDrawer },
+                            modifier = Modifier.size(34.dp).testTag("btn_hierarchy")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountTree,
+                                contentDescription = "Hierarchy",
+                                tint = if (showHierarchyDrawer) StudioAccentBlue else StudioTextPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
 
-                            // Zoom info & Reset
-                            Text("Zoom ${(editorState.zoom * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = StudioTextSecondary)
-                            FilledTonalButton(
-                                onClick = { editorState.zoom = 1.0f },
-                                modifier = Modifier.height(30.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("100%", fontSize = 11.sp)
-                            }
+                        // Assets
+                        IconButton(
+                            onClick = { showAssetManagerSheet = true },
+                            modifier = Modifier.size(34.dp).testTag("btn_assets")
+                        ) {
+                            Icon(Icons.Default.Folder, contentDescription = "Assets", tint = StudioTextPrimary, modifier = Modifier.size(18.dp))
+                        }
+
+                        // Library
+                        IconButton(
+                            onClick = { showLibrarySheet = true },
+                            modifier = Modifier.size(34.dp).testTag("btn_library")
+                        ) {
+                            Icon(Icons.Default.BookmarkBorder, contentDescription = "Library", tint = StudioTextPrimary, modifier = Modifier.size(18.dp))
+                        }
+
+                        // Project Settings
+                        IconButton(
+                            onClick = { showProjectSettings = true },
+                            modifier = Modifier.size(34.dp).testTag("btn_settings")
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = StudioTextPrimary, modifier = Modifier.size(18.dp))
+                        }
+
+                        VerticalDivider(modifier = Modifier.height(20.dp), color = StudioSurfaceBorder)
+
+                        // Undo
+                        IconButton(
+                            onClick = { editorState.undo() },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", tint = StudioTextPrimary, modifier = Modifier.size(18.dp))
+                        }
+
+                        // Redo
+                        IconButton(
+                            onClick = { editorState.redo() },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", tint = StudioTextPrimary, modifier = Modifier.size(18.dp))
+                        }
+
+                        VerticalDivider(modifier = Modifier.height(20.dp), color = StudioSurfaceBorder)
+
+                        // Zoom info & Reset
+                        Text(
+                            "Zoom ${(editorState.zoom * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = StudioTextSecondary,
+                            fontSize = 11.sp
+                        )
+                        FilledTonalButton(
+                            onClick = { editorState.zoom = 1.0f },
+                            modifier = Modifier.height(28.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text("100%", fontSize = 10.5.sp)
                         }
                     }
                 }
             },
             bottomBar = {
-                // Bottom Quick Action Bar
+                // Bottom Quick Action Bar (Horizontally scrollable, icon-only buttons)
                 Surface(
                     color = StudioSurface,
                     shadowElevation = 8.dp,
                     border = BorderStroke(1.dp, StudioSurfaceBorder)
                 ) {
+                    val sel = editorState.selectedObject
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Coordinates and properties summary HUD
-                        val sel = editorState.selectedObject
-                        if (sel != null) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "${sel.name} (${sel.type.name})",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = StudioTextPrimary
-                                )
-                                Text(
-                                    text = "X: ${sel.x.toInt()}  Y: ${sel.y.toInt()}  W: ${sel.width.toInt()}  H: ${sel.height.toInt()}  Rot: ${sel.rotation.toInt()}°  Z: ${sel.zIndex}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = StudioTextSecondary
-                                )
-                            }
-
-                            Button(
-                                onClick = { showPropertySheet = true },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = StudioAccentBlue),
-                                modifier = Modifier.testTag("btn_inspect_properties")
+                        // Fixed width object name container with auto-text-size to fit
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = StudioSurfaceElevated,
+                            border = BorderStroke(1.dp, StudioSurfaceBorder),
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(38.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.CenterStart
                             ) {
-                                Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Properties")
+                                val nameText = sel?.name ?: "No Selection"
+                                val autoFontSize = when {
+                                    nameText.length > 14 -> 9.sp
+                                    nameText.length > 10 -> 10.5.sp
+                                    else -> 12.sp
+                                }
+                                Text(
+                                    text = nameText,
+                                    fontSize = autoFontSize,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (sel != null) StudioTextPrimary else StudioTextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                        } else {
-                            Text(
-                                text = "Select an object to inspect or drag empty space to pan world",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = StudioTextSecondary,
-                                modifier = Modifier.weight(1f)
+                        }
+
+                        // Properties Button: Icon only
+                        IconButton(
+                            onClick = { showPropertySheet = true },
+                            enabled = (sel != null),
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (sel != null) StudioAccentBlue else StudioSurfaceElevated)
+                                .testTag("btn_inspect_properties")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Properties",
+                                tint = if (sel != null) Color.White else StudioTextTertiary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        // Add Object Button
-                        FilledTonalButton(
+                        // Add Object Button: Icon only
+                        IconButton(
                             onClick = { showAddObjectDialog = true },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.testTag("btn_add_object")
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(StudioAccentOrange)
+                                .testTag("btn_add_object")
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Add Object")
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add Object",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        // Coordinates summary badge
+                        if (sel != null) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = StudioSurfaceElevated,
+                                modifier = Modifier.padding(start = 2.dp)
+                            ) {
+                                Text(
+                                    text = "X: ${sel.x.toInt()}  Y: ${sel.y.toInt()}  W: ${sel.width.toInt()}  H: ${sel.height.toInt()}  ${sel.rotation.toInt()}°",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = StudioTextSecondary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "Drag canvas to pan • Tap object to select",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = StudioTextSecondary,
+                                modifier = Modifier.padding(start = 4.dp)
+                            )
                         }
                     }
                 }

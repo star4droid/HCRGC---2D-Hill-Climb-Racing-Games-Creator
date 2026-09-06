@@ -29,10 +29,12 @@ enum class TransformMode {
 }
 
 class EditorState(
-    var project: ProjectConfig,
-    var level: LevelData,
+    initialProject: ProjectConfig,
+    initialLevel: LevelData,
     val onLevelModified: () -> Unit = {}
 ) {
+    var project by mutableStateOf(initialProject)
+    var level by mutableStateOf(initialLevel)
     // Canvas pan and zoom (unlimited zoom range for deep zooming and macro views)
     var zoom by mutableFloatStateOf(0.75f)
     var panX by mutableFloatStateOf(200f)
