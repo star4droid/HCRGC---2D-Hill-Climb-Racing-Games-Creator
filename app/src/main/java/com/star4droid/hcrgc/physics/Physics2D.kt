@@ -134,26 +134,30 @@ object CollisionHelper {
             // Distance along normal from nearest point on segment
             val toPx = px - nearestX
             val toPy = py - nearestY
+            val distToSeg = hypot(toPx, toPy)
+
+            // Must be within proximity of the line segment
+            if (distToSeg > proximityThreshold) {
+                continue
+            }
+
             val normalDist = toPx * normal.x + toPy * normal.y
 
             // normalDist < 0 means point is on the underside/inside (penetrating)
             // normalDist >= 0 means point is above the terrain in air
             val penetration = -normalDist
 
-            if (penetration > -proximityThreshold) {
-                // If px is within segment X bounds or near endpoint
-                if ((px in minX..maxX || hypot(toPx, toPy) < proximityThreshold) && penetration > maxPenetration) {
-                    maxPenetration = penetration
-                    val slope = atan2(dy, dx) * (180f / Math.PI.toFloat())
-                    bestContact = TerrainContact(
-                        isContact = true,
-                        penetration = penetration,
-                        surfacePoint = Vec2(nearestX, nearestY),
-                        normal = normal,
-                        tangent = tangent,
-                        slopeDegrees = slope
-                    )
-                }
+            if (penetration > -proximityThreshold && penetration > maxPenetration) {
+                maxPenetration = penetration
+                val slope = atan2(dy, dx) * (180f / Math.PI.toFloat())
+                bestContact = TerrainContact(
+                    isContact = true,
+                    penetration = penetration,
+                    surfacePoint = Vec2(nearestX, nearestY),
+                    normal = normal,
+                    tangent = tangent,
+                    slopeDegrees = slope
+                )
             }
         }
 
@@ -171,24 +175,30 @@ object CollisionHelper {
         val nearestX = px.coerceIn(bLeft, bRight)
         val nearestY = py.coerceIn(bTop, bBottom)
 
-        val distToTop = abs(py - bTop)
-        val distToBottom = abs(py - bBottom)
-        val distToLeft = abs(px - bLeft)
-        val distToRight = abs(px - bRight)
-
-        val minDist = minOf(distToTop, distToBottom, distToLeft, distToRight)
-
-        val (normal, surfacePt) = when (minDist) {
-            distToTop -> Pair(Vec2(0f, -1f), Vec2(nearestX, bTop))
-            distToLeft -> Pair(Vec2(-1f, 0f), Vec2(bLeft, nearestY))
-            distToRight -> Pair(Vec2(1f, 0f), Vec2(bRight, nearestY))
-            else -> Pair(Vec2(0f, 1f), Vec2(nearestX, bBottom))
-        }
-
         val isInside = px in bLeft..bRight && py in bTop..bBottom
-        val penetration = if (isInside) (proximityThreshold + minDist) else (proximityThreshold - minDist)
 
-        if (penetration <= -proximityThreshold) return null
+        val (normal, penetration, surfacePt) = if (isInside) {
+            val distToTop = py - bTop
+            val distToBottom = bBottom - py
+            val distToLeft = px - bLeft
+            val distToRight = bRight - px
+            val minDist = minOf(distToTop, distToBottom, distToLeft, distToRight)
+
+            when (minDist) {
+                distToTop -> Triple(Vec2(0f, -1f), distToTop, Vec2(nearestX, bTop))
+                distToLeft -> Triple(Vec2(-1f, 0f), distToLeft, Vec2(bLeft, nearestY))
+                distToRight -> Triple(Vec2(1f, 0f), distToRight, Vec2(bRight, nearestY))
+                else -> Triple(Vec2(0f, 1f), distToBottom, Vec2(nearestX, bBottom))
+            }
+        } else {
+            val dx = px - nearestX
+            val dy = py - nearestY
+            val dist = hypot(dx, dy)
+            if (dist > proximityThreshold) return null
+
+            val n = if (dist > 0.0001f) Vec2(dx / dist, dy / dist) else Vec2(0f, -1f)
+            Triple(n, proximityThreshold - dist, Vec2(nearestX, nearestY))
+        }
 
         val tangent = Vec2(-normal.y, normal.x)
         val forwardTangent = if (tangent.x >= 0f) tangent else Vec2(-tangent.x, -tangent.y)
@@ -252,7 +262,7 @@ class PhysicsWorld(
                 val bottomY = body.position.y + halfH
 
                 val contact = CollisionHelper.checkPointAgainstTerrain(
-                    body.position.x, bottomY, terrainSegments, proximityThreshold = halfH
+                    body.position.x, bottomY, terrainSegments, proximityThreshold = 10f
                 )
 
                 if (contact != null && contact.penetration > 0f) {

@@ -1,5 +1,7 @@
 package com.star4droid.hcrgc.runtime
 
+import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -32,6 +34,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,9 +58,22 @@ fun GameRuntimeScreen(
     var gameTime by remember { mutableFloatStateOf(0f) }
     var coinsCollected by remember { mutableIntStateOf(0) }
     var showFps by remember { mutableStateOf(true) }
+    var showPhysicsDebug by remember { mutableStateOf(false) }
     var currentFps by remember { mutableIntStateOf(60) }
     var frameCount by remember { mutableIntStateOf(0) }
     var lastFpsTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    // Intercept hardware back button to show pause menu during gameplay
+    BackHandler {
+        if (!isPaused && !isFinished) {
+            isPaused = true
+        } else if (isPaused) {
+            onExitToEditor()
+        }
+    }
+
+    val configuration = LocalConfiguration.current
+    val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
 
     // Control inputs
     var isGasPressed by remember { mutableStateOf(false) }
@@ -340,106 +356,219 @@ fun GameRuntimeScreen(
                         val ew = elem.width * zoom
                         val eh = elem.height * zoom
 
-                        drawRoundRect(
-                            color = StudioAccentIndigo,
-                            topLeft = Offset(cx + relX - ew / 2f, cy + relY - eh / 2f),
-                            size = Size(ew, eh),
-                            cornerRadius = CornerRadius(4f, 4f)
-                        )
+                        val elemTint = Color(elem.tintColor)
+                        if (elem.imageAsset != null) {
+                            translate(cx + relX - ew / 2f, cy + relY - eh / 2f) {
+                                VectorSprites.drawAsset(
+                                    this@Canvas,
+                                    elem.imageAsset,
+                                    ew, eh,
+                                    tint = elemTint
+                                )
+                            }
+                        } else {
+                            drawRoundRect(
+                                color = elemTint,
+                                topLeft = Offset(cx + relX - ew / 2f, cy + relY - eh / 2f),
+                                size = Size(ew, eh),
+                                cornerRadius = CornerRadius(4f, 4f)
+                            )
+                        }
                     }
                 }
             }
 
-            // 7. Ambient Lighting & Box2D Lights Layer
+            // 7. Ambient Lighting & Box2D Lights Layer (Reveals track/car images underneath!)
             val ambientIntensity = project.ambientLightIntensity.coerceIn(0f, 1f)
             val lightObjects = simContext.cachedLights
 
-            if (ambientIntensity < 0.96f || lightObjects.isNotEmpty()) {
-                val darknessAlpha = (1f - ambientIntensity).coerceIn(0f, 0.92f)
+            if (ambientIntensity < 0.98f || lightObjects.isNotEmpty()) {
+                val darknessAlpha = (1f - ambientIntensity).coerceIn(0f, 0.88f)
                 val ambientCol = Color(project.ambientLightColor)
 
-                // Render ambient darkness layer across viewport
-                if (darknessAlpha > 0.04f) {
+                if (darknessAlpha > 0.03f) {
+                    val nativeCanvas = drawContext.canvas.nativeCanvas
+                    val saveCount = nativeCanvas.saveLayer(0f, 0f, size.width, size.height, null)
+
+                    // Ambient darkness overlay
                     drawRect(
                         color = ambientCol.copy(alpha = darknessAlpha),
-                        topLeft = Offset(0f, 0f),
+                        topLeft = Offset.Zero,
                         size = size
                     )
-                }
 
-                // Render Box2D Lights (Cone, Point, Directional)
-                for (lightObj in lightObjects) {
-                    val cfg = lightObj.light ?: continue
-                    val lightCol = Color(cfg.color)
-                    val baseDist = cfg.distance * zoom
+                    // Render Box2D Lights (Cut holes through darkness to reveal track & street)
+                    for (lightObj in lightObjects) {
+                        val cfg = lightObj.light ?: continue
+                        val lightCol = Color(cfg.color)
+                        val baseDist = cfg.distance * zoom
 
-                    // Determine light position & direction (handle car headlights attachment)
-                    val (lx, ly, lRot) = if (cfg.attachToParent && vc != null) {
-                        val cPos = vc.chassis.position
-                        Triple(cPos.x * zoom + offsetX, cPos.y * zoom + offsetY, vc.chassis.rotation + cfg.direction)
-                    } else {
-                        Triple(lightObj.x * zoom + offsetX, lightObj.y * zoom + offsetY, cfg.direction)
-                    }
+                        val (lx, ly, lRot) = if (cfg.attachToParent && vc != null) {
+                            val cPos = vc.chassis.position
+                            Triple(cPos.x * zoom + offsetX, cPos.y * zoom + offsetY, vc.chassis.rotation + cfg.direction)
+                        } else {
+                            Triple(lightObj.x * zoom + offsetX, lightObj.y * zoom + offsetY, cfg.direction)
+                        }
 
-                    when (cfg.lightType) {
-                        LightType.CONE -> {
-                            rotate(lRot, pivot = Offset(lx, ly)) {
-                                val halfAngleRad = Math.toRadians((cfg.coneAngle / 2f).toDouble())
-                                val cosA = cos(halfAngleRad).toFloat()
-                                val sinA = sin(halfAngleRad).toFloat()
-                                val conePath = Path().apply {
-                                    moveTo(lx, ly)
-                                    lineTo(lx + baseDist * cosA, ly - baseDist * sinA)
-                                    lineTo(lx + baseDist, ly)
-                                    lineTo(lx + baseDist * cosA, ly + baseDist * sinA)
-                                    close()
+                        when (cfg.lightType) {
+                            LightType.CONE -> {
+                                rotate(lRot, pivot = Offset(lx, ly)) {
+                                    val halfAngleRad = Math.toRadians((cfg.coneAngle / 2f).toDouble())
+                                    val cosA = cos(halfAngleRad).toFloat()
+                                    val sinA = sin(halfAngleRad).toFloat()
+                                    val conePath = Path().apply {
+                                        moveTo(lx, ly)
+                                        lineTo(lx + baseDist * cosA, ly - baseDist * sinA)
+                                        lineTo(lx + baseDist, ly)
+                                        lineTo(lx + baseDist * cosA, ly + baseDist * sinA)
+                                        close()
+                                    }
+                                    // 1. Cut hole in darkness to reveal underlying graphics
+                                    drawPath(
+                                        conePath,
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = (cfg.intensity).coerceIn(0.2f, 1f)),
+                                                Color.Transparent
+                                            ),
+                                            center = Offset(lx, ly),
+                                            radius = baseDist
+                                        ),
+                                        blendMode = BlendMode.DstOut
+                                    )
+                                    // 2. Add light hue glow
+                                    drawPath(
+                                        conePath,
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(
+                                                lightCol.copy(alpha = (cfg.intensity * 0.35f).coerceIn(0.1f, 0.6f)),
+                                                Color.Transparent
+                                            ),
+                                            center = Offset(lx, ly),
+                                            radius = baseDist
+                                        ),
+                                        blendMode = BlendMode.Plus
+                                    )
                                 }
-                                drawPath(
-                                    conePath,
+                            }
+                            LightType.DIRECTIONAL -> {
+                                rotate(lRot, pivot = Offset(lx, ly)) {
+                                    drawRect(
+                                        brush = Brush.horizontalGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = cfg.intensity.coerceIn(0.2f, 1f)),
+                                                Color.Transparent
+                                            ),
+                                            startX = lx,
+                                            endX = lx + baseDist * 2f
+                                        ),
+                                        topLeft = Offset(lx, ly - baseDist * 0.5f),
+                                        size = Size(baseDist * 2f, baseDist),
+                                        blendMode = BlendMode.DstOut
+                                    )
+                                    drawRect(
+                                        brush = Brush.horizontalGradient(
+                                            colors = listOf(
+                                                lightCol.copy(alpha = (cfg.intensity * 0.35f).coerceIn(0.1f, 0.6f)),
+                                                Color.Transparent
+                                            ),
+                                            startX = lx,
+                                            endX = lx + baseDist * 2f
+                                        ),
+                                        topLeft = Offset(lx, ly - baseDist * 0.5f),
+                                        size = Size(baseDist * 2f, baseDist),
+                                        blendMode = BlendMode.Plus
+                                    )
+                                }
+                            }
+                            else -> {
+                                // Point light: cut hole to reveal road/track
+                                drawCircle(
                                     brush = Brush.radialGradient(
                                         colors = listOf(
-                                            lightCol.copy(alpha = (cfg.intensity * 0.75f).coerceIn(0.1f, 0.9f)),
-                                            lightCol.copy(alpha = 0.2f),
+                                            Color.White.copy(alpha = cfg.intensity.coerceIn(0.2f, 1f)),
                                             Color.Transparent
                                         ),
                                         center = Offset(lx, ly),
                                         radius = baseDist
-                                    )
+                                    ),
+                                    radius = baseDist,
+                                    center = Offset(lx, ly),
+                                    blendMode = BlendMode.DstOut
                                 )
-                            }
-                        }
-                        LightType.DIRECTIONAL -> {
-                            rotate(lRot, pivot = Offset(lx, ly)) {
-                                drawRect(
-                                    brush = Brush.horizontalGradient(
+                                // Add light tint
+                                drawCircle(
+                                    brush = Brush.radialGradient(
                                         colors = listOf(
-                                            lightCol.copy(alpha = (cfg.intensity * 0.65f).coerceIn(0.1f, 0.85f)),
+                                            lightCol.copy(alpha = (cfg.intensity * 0.35f).coerceIn(0.1f, 0.6f)),
                                             Color.Transparent
                                         ),
-                                        startX = lx,
-                                        endX = lx + baseDist * 2f
+                                        center = Offset(lx, ly),
+                                        radius = baseDist
                                     ),
-                                    topLeft = Offset(lx, ly - baseDist * 0.5f),
-                                    size = Size(baseDist * 2f, baseDist)
+                                    radius = baseDist,
+                                    center = Offset(lx, ly),
+                                    blendMode = BlendMode.Plus
                                 )
                             }
                         }
-                        else -> {
-                            // Point / Omnidirectional light
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        lightCol.copy(alpha = (cfg.intensity * 0.75f).coerceIn(0.1f, 0.9f)),
-                                        lightCol.copy(alpha = 0.25f),
-                                        Color.Transparent
-                                    ),
-                                    center = Offset(lx, ly),
-                                    radius = baseDist
-                                ),
-                                radius = baseDist,
-                                center = Offset(lx, ly)
-                            )
-                        }
+                    }
+
+                    nativeCanvas.restoreToCount(saveCount)
+                }
+            }
+
+            // 8. Physics 2D Debug Visualization Overlay (Box2D collision lines, joints, velocities)
+            if (showPhysicsDebug) {
+                // Terrain segments (Bright green lines)
+                for (seg in simContext.terrainSegments) {
+                    val p1x = seg.first.x * zoom + offsetX
+                    val p1y = seg.first.y * zoom + offsetY
+                    val p2x = seg.second.x * zoom + offsetX
+                    val p2y = seg.second.y * zoom + offsetY
+                    drawLine(Color(0xFF00FF66), Offset(p1x, p1y), Offset(p2x, p2y), strokeWidth = 3f)
+                }
+
+                // TileMap static collision boxes (Cyan outlines)
+                for (box in simContext.staticBoxes) {
+                    val bx = box[0] * zoom + offsetX
+                    val by = box[1] * zoom + offsetY
+                    val bw = (box[2] - box[0]) * zoom
+                    val bh = (box[3] - box[1]) * zoom
+                    drawRect(Color(0xFF00E5FF).copy(alpha = 0.2f), Offset(bx, by), Size(bw, bh))
+                    drawRect(Color(0xFF00E5FF), Offset(bx, by), Size(bw, bh), style = Stroke(2f))
+                }
+
+                // Physics World bodies (crates, boxes, dynamic objects)
+                for (b in simContext.physicsWorld.bodies) {
+                    val bx = b.position.x * zoom + offsetX
+                    val by = b.position.y * zoom + offsetY
+                    val bw = b.width * zoom
+                    val bh = b.height * zoom
+                    val bCol = if (b.isVehicleChassis) Color(0xFFFF9100) else if (b.isStatic) Color(0xFF00E5FF) else Color(0xFFFF0055)
+                    rotate(b.rotation, pivot = Offset(bx, by)) {
+                        drawRect(bCol, Offset(bx - bw / 2f, by - bh / 2f), Size(bw, bh), style = Stroke(2f))
+                        drawCircle(Color.White, radius = 3f, center = Offset(bx, by))
+                    }
+                    if (hypot(b.velocity.x, b.velocity.y) > 5f) {
+                        drawLine(
+                            Color.Yellow,
+                            Offset(bx, by),
+                            Offset(bx + b.velocity.x * 0.08f * zoom, by + b.velocity.y * 0.08f * zoom),
+                            strokeWidth = 2f
+                        )
+                    }
+                }
+
+                // Vehicle Wheels & Suspension Rays
+                if (vc != null) {
+                    for (w in vc.wheels) {
+                        val wx = w.body.position.x * zoom + offsetX
+                        val wy = w.body.position.y * zoom + offsetY
+                        val wr = w.config.radius * zoom
+                        val wCol = if (w.isGrounded) Color(0xFF00FF66) else Color(0xFFFF1744)
+                        drawCircle(wCol, radius = wr, center = Offset(wx, wy), style = Stroke(2f))
+                        drawCircle(wCol, radius = 4f, center = Offset(wx, wy))
                     }
                 }
             }
@@ -454,8 +583,12 @@ fun GameRuntimeScreen(
             showFps = showFps,
             fps = currentFps,
             onHideFps = { showFps = false },
+            showPhysicsDebug = showPhysicsDebug,
+            onToggleDebug = { showPhysicsDebug = !showPhysicsDebug },
+            isPortrait = isPortrait,
             uiObjects = simContext.cachedHudUiObjects,
             onPauseClick = { isPaused = !isPaused },
+            onExitClick = onExitToEditor,
             onGasPressedChange = { isGasPressed = it },
             onBrakePressedChange = { isBrakePressed = it },
             onTiltLeftChange = { isTiltLeftPressed = it },
@@ -485,29 +618,60 @@ fun GameRuntimeScreen(
                     shape = RoundedCornerShape(20.dp),
                     color = StudioSurface,
                     border = BorderStroke(1.dp, StudioSurfaceBorder),
-                    modifier = Modifier.padding(32.dp)
+                    modifier = Modifier
+                        .padding(horizontal = if (isPortrait) 20.dp else 32.dp)
+                        .widthIn(max = 420.dp)
+                        .fillMaxWidth(if (isPortrait) 0.92f else 0.55f)
                 ) {
                     Column(
-                        modifier = Modifier.padding(24.dp),
+                        modifier = Modifier.padding(if (isPortrait) 20.dp else 24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text("Game Paused", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(16.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(
-                                onClick = { isPaused = false },
-                                colors = ButtonDefaults.buttonColors(containerColor = StudioAccentGreen)
+                        Spacer(Modifier.height(18.dp))
+                        if (isPortrait) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Resume")
+                                Button(
+                                    onClick = { isPaused = false },
+                                    colors = ButtonDefaults.buttonColors(containerColor = StudioAccentGreen),
+                                    modifier = Modifier.fillMaxWidth().height(46.dp)
+                                ) {
+                                    Text("Resume", fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = { resetGame() },
+                                    modifier = Modifier.fillMaxWidth().height(46.dp)
+                                ) {
+                                    Text("Restart", fontWeight = FontWeight.Bold)
+                                }
+                                Button(
+                                    onClick = onExitToEditor,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                    modifier = Modifier.fillMaxWidth().height(46.dp)
+                                ) {
+                                    Text("Exit", fontWeight = FontWeight.Bold)
+                                }
                             }
-                            OutlinedButton(onClick = { resetGame() }) {
-                                Text("Restart")
-                            }
-                            Button(
-                                onClick = onExitToEditor,
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Text("Exit")
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Button(
+                                    onClick = { isPaused = false },
+                                    colors = ButtonDefaults.buttonColors(containerColor = StudioAccentGreen)
+                                ) {
+                                    Text("Resume")
+                                }
+                                OutlinedButton(onClick = { resetGame() }) {
+                                    Text("Restart")
+                                }
+                                Button(
+                                    onClick = onExitToEditor,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Text("Exit")
+                                }
                             }
                         }
                     }
@@ -526,8 +690,12 @@ private fun RuntimeHUD(
     showFps: Boolean,
     fps: Int,
     onHideFps: () -> Unit,
+    showPhysicsDebug: Boolean,
+    onToggleDebug: () -> Unit,
+    isPortrait: Boolean,
     uiObjects: List<GameObject>,
     onPauseClick: () -> Unit,
+    onExitClick: () -> Unit,
     onGasPressedChange: (Boolean) -> Unit,
     onBrakePressedChange: (Boolean) -> Unit,
     onTiltLeftChange: (Boolean) -> Unit,
@@ -595,16 +763,16 @@ private fun RuntimeHUD(
             }
         }
 
-        // Top HUD Bar: Distance, FPS, Time, Coins, Pause
+        // Top HUD Bar: Progress, FPS, Physics Debug, Time, Coins, Pause, Exit
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = if (isPortrait) 12.dp else 20.dp, vertical = if (isPortrait) 8.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Distance Progress & FPS Counter
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Left: Progress & FPS & Debug toggle
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 val progress = ((carX / finishX).coerceIn(0f, 1f) * 100).toInt()
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -613,11 +781,11 @@ private fun RuntimeHUD(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = if (isPortrait) 8.dp else 12.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.Flag, contentDescription = null, tint = StudioAccentOrange, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("$progress%", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = StudioTextPrimary)
+                        Icon(Icons.Default.Flag, contentDescription = null, tint = StudioAccentOrange, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("$progress%", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StudioTextPrimary)
                     }
                 }
 
@@ -639,27 +807,46 @@ private fun RuntimeHUD(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(7.dp)
+                                    .size(6.dp)
                                     .background(if (fps >= 50) StudioAccentGreen else StudioAccentAmber, CircleShape)
                             )
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text(
-                                text = "$fps FPS",
+                                text = "$fps",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 color = if (fps >= 50) StudioAccentGreen else StudioAccentAmber
                             )
                         }
                     }
                 }
+
+                // Physics Collision / Box2D Wireframe Toggle
+                IconButton(
+                    onClick = onToggleDebug,
+                    modifier = Modifier
+                        .background(
+                            if (showPhysicsDebug) StudioAccentIndigo.copy(alpha = 0.85f) else StudioSurfaceElevated.copy(alpha = 0.9f),
+                            CircleShape
+                        )
+                        .border(1.dp, if (showPhysicsDebug) StudioAccentIndigo else StudioSurfaceBorder, CircleShape)
+                        .size(34.dp)
+                ) {
+                    Icon(
+                        Icons.Default.BugReport,
+                        contentDescription = "Toggle Physics Debug",
+                        tint = if (showPhysicsDebug) Color.White else StudioTextSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
 
-            // Live Time & Coins
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Right: Time, Coins, Pause & Exit
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = StudioSurfaceElevated.copy(alpha = 0.9f),
@@ -667,11 +854,11 @@ private fun RuntimeHUD(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = if (isPortrait) 8.dp else 12.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.Timer, contentDescription = null, tint = StudioAccentBlue, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(String.format("%.1fs", timeSeconds), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = StudioTextPrimary)
+                        Icon(Icons.Default.Timer, contentDescription = null, tint = StudioAccentBlue, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(String.format("%.1fs", timeSeconds), fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StudioTextPrimary)
                     }
                 }
 
@@ -682,11 +869,11 @@ private fun RuntimeHUD(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = if (isPortrait) 8.dp else 12.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.MonetizationOn, contentDescription = null, tint = StudioAccentAmber, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("$coins", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = StudioAccentAmber)
+                        Icon(Icons.Default.MonetizationOn, contentDescription = null, tint = StudioAccentAmber, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("$coins", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StudioAccentAmber)
                     }
                 }
 
@@ -695,54 +882,71 @@ private fun RuntimeHUD(
                     modifier = Modifier
                         .background(StudioSurfaceElevated.copy(alpha = 0.9f), CircleShape)
                         .border(1.dp, StudioSurfaceBorder, CircleShape)
-                        .size(36.dp)
+                        .size(34.dp)
                 ) {
-                    Icon(Icons.Default.Pause, contentDescription = "Pause", tint = StudioTextPrimary, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Pause, contentDescription = "Pause", tint = StudioTextPrimary, modifier = Modifier.size(16.dp))
+                }
+
+                IconButton(
+                    onClick = onExitClick,
+                    modifier = Modifier
+                        .background(StudioSurfaceElevated.copy(alpha = 0.9f), CircleShape)
+                        .border(1.dp, StudioSurfaceBorder, CircleShape)
+                        .size(34.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Exit to Editor", tint = StudioTextPrimary, modifier = Modifier.size(16.dp))
                 }
             }
         }
 
         // Bottom Pedals & Controls (Gas, Brake, In-Air Tilt)
+        val pedalWidth = if (isPortrait) 75.dp else 110.dp
+        val tiltWidth = if (isPortrait) 48.dp else 65.dp
+        val controlHeight = if (isPortrait) 62.dp else 75.dp
+        val pedalSpacing = if (isPortrait) 6.dp else 12.dp
+        val hPadding = if (isPortrait) 12.dp else 24.dp
+        val vPadding = if (isPortrait) 14.dp else 20.dp
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 24.dp, vertical = 20.dp),
+                .padding(horizontal = hPadding, vertical = vPadding),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom
         ) {
             // Left Controls: Brake & Tilt Left
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(pedalSpacing)) {
                 PedalButton(
                     label = "BRAKE",
                     color = Color(0xFFEF4444),
                     icon = Icons.Default.VerticalAlignBottom,
-                    modifier = Modifier.size(width = 110.dp, height = 75.dp).testTag("pedal_brake"),
+                    modifier = Modifier.size(width = pedalWidth, height = controlHeight).testTag("pedal_brake"),
                     onPressedChange = onBrakePressedChange
                 )
                 PedalButton(
-                    label = "TILT ↶",
+                    label = "↶",
                     color = Color(0xFF64748B),
                     icon = Icons.Default.RotateLeft,
-                    modifier = Modifier.size(width = 65.dp, height = 75.dp),
+                    modifier = Modifier.size(width = tiltWidth, height = controlHeight),
                     onPressedChange = onTiltLeftChange
                 )
             }
 
             // Right Controls: Tilt Right & Gas
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(pedalSpacing)) {
                 PedalButton(
-                    label = "↷ TILT",
+                    label = "↷",
                     color = Color(0xFF64748B),
                     icon = Icons.Default.RotateRight,
-                    modifier = Modifier.size(width = 65.dp, height = 75.dp),
+                    modifier = Modifier.size(width = tiltWidth, height = controlHeight),
                     onPressedChange = onTiltRightChange
                 )
                 PedalButton(
                     label = "GAS",
                     color = Color(0xFF22C55E),
                     icon = Icons.Default.Speed,
-                    modifier = Modifier.size(width = 110.dp, height = 75.dp).testTag("pedal_gas"),
+                    modifier = Modifier.size(width = pedalWidth, height = controlHeight).testTag("pedal_gas"),
                     onPressedChange = onGasPressedChange
                 )
             }
@@ -810,7 +1014,10 @@ private fun VictoryDialog(
             color = StudioSurface,
             border = BorderStroke(2.dp, StudioAccentAmber),
             shadowElevation = 16.dp,
-            modifier = Modifier.padding(28.dp).fillMaxWidth(0.65f)
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .widthIn(max = 440.dp)
+                .fillMaxWidth(0.9f)
         ) {
             Column(
                 modifier = Modifier.padding(28.dp),

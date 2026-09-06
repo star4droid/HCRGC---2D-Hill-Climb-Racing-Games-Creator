@@ -81,27 +81,28 @@ class VehicleController(
                 wheel.suspensionCompression = compression
 
                 // Spring & damper force along contact normal
-                val springK = wheel.config.suspensionFrequency * 3200f
+                val springK = (wheel.config.suspensionFrequency * 450f).coerceIn(200f, 2500f)
                 val springForceMag = compression * springK
 
                 val relVel = chassis.velocity.dot(contact.normal)
-                val damping = wheel.config.suspensionDamping * 220f * relVel
-                val totalNormalForce = (springForceMag - damping).coerceAtLeast(0f)
+                val damping = (-relVel) * (wheel.config.suspensionDamping * 60f).coerceIn(10f, 180f)
+                val totalNormalForce = (springForceMag + damping).coerceIn(0f, 6500f)
 
                 val normalForce = contact.normal * totalNormalForce
 
                 // Apply normal force to chassis
                 chassis.applyForce(normalForce, dt)
 
-                // Rotational torque from suspension push
+                // Rotational torque from suspension push (clamped to prevent violent flips)
                 val rx = anchorX - chassis.position.x
                 val ry = anchorY - chassis.position.y
-                val torque = rx * normalForce.y - ry * normalForce.x
-                chassis.applyTorque(torque * 0.75f, dt)
+                val rawTorque = rx * normalForce.y - ry * normalForce.x
+                val torque = rawTorque.coerceIn(-3500f, 3500f)
+                chassis.applyTorque(torque * 0.35f, dt)
 
                 // Anti-penetration position correction
                 if (contact.penetration > 1.5f) {
-                    val pushAmount = min(contact.penetration * 0.35f, 5f)
+                    val pushAmount = min(contact.penetration * 0.35f, 4f)
                     chassis.position.x += contact.normal.x * pushAmount
                     chassis.position.y += contact.normal.y * pushAmount
                 }
@@ -109,28 +110,29 @@ class VehicleController(
                 // Surface tangent & vehicle drive force
                 val forwardTangent = if (contact.tangent.x >= 0f) contact.tangent else Vec2(-contact.tangent.x, -contact.tangent.y)
                 val tangentVel = chassis.velocity.dot(forwardTangent)
-                val driveScale = (carConfig.enginePower.coerceAtLeast(0.6f)) * 9000f
+                val driveScale = if (carConfig.enginePower <= 0f || carConfig.maxSpeed <= 0f) 0f else carConfig.enginePower * 3500f
+                val maxSpeedPx = (carConfig.maxSpeed * 30f).coerceAtLeast(0f)
 
                 if (throttle > 0f) {
-                    // Gas: continuous responsive forward acceleration
-                    if (tangentVel < 1200f) {
-                        val uphillFactor = 1.0f + (-forwardTangent.y * 1.4f).coerceAtLeast(0f)
+                    // Gas: acceleration up to user-configured maxSpeed
+                    if (tangentVel < maxSpeedPx && driveScale > 0f) {
+                        val uphillFactor = 1.0f + (-forwardTangent.y * 1.2f).coerceAtLeast(0f)
                         val driveForce = forwardTangent * (throttle * driveScale * uphillFactor)
                         chassis.applyForce(driveForce, dt)
                     }
                 } else if (throttle < 0f) {
                     // Brake / Reverse
-                    if (tangentVel > 25f) {
-                        val brakeForce = forwardTangent * (-min(tangentVel * 22f, 26000f))
+                    if (tangentVel > 15f) {
+                        val brakeForce = forwardTangent * (-min(tangentVel * 25f, 12000f))
                         chassis.applyForce(brakeForce, dt)
-                    } else if (tangentVel > -450f) {
-                        val revForce = forwardTangent * (throttle * driveScale * 0.7f)
+                    } else if (tangentVel > -maxSpeedPx * 0.5f && driveScale > 0f) {
+                        val revForce = forwardTangent * (throttle * driveScale * 0.6f)
                         chassis.applyForce(revForce, dt)
                     }
                 } else {
                     // Natural coasting friction
                     if (abs(tangentVel) > 4f) {
-                        val rollFriction = forwardTangent * (-sign(tangentVel) * 120f)
+                        val rollFriction = forwardTangent * (-sign(tangentVel) * 100f)
                         chassis.applyForce(rollFriction, dt)
                     }
                 }
@@ -225,23 +227,25 @@ class VehicleController(
 
         // 4. In-Air Tilt Controls
         if (!anyWheelGrounded) {
-            val airControlRate = carConfig.airControl.coerceAtLeast(0.5f)
+            val airControlRate = (carConfig.airControl * 0.8f).coerceIn(0f, 15f)
             val airTorque = when {
-                airTilt != 0f -> airTilt * airControlRate * 16000f
-                throttle > 0f -> -throttle * airControlRate * 10500f // Gas pitches up/back
-                throttle < 0f -> -throttle * airControlRate * 10500f // Brake pitches down/forward
+                airTilt != 0f -> airTilt * airControlRate * 8000f
+                throttle > 0f -> -throttle * airControlRate * 5000f // Gas pitches up/back
+                throttle < 0f -> -throttle * airControlRate * 5000f // Brake pitches down/forward
                 else -> 0f
             }
             if (airTorque != 0f) {
                 chassis.applyTorque(airTorque, dt)
             }
         } else if (airTilt != 0f) {
-            chassis.applyTorque(airTilt * carConfig.airControl * 9000f, dt)
+            chassis.applyTorque(airTilt * carConfig.airControl * 5000f, dt)
         }
 
-        // 5. Ground stability assistance
-        if (groundTractionCount > 0) {
-            chassis.angularVelocity *= 0.94f
+        // 5. Ground stability assistance: keep the car well balanced
+        if (groundTractionCount >= 2) {
+            chassis.angularVelocity *= 0.88f // Strong dampening when both wheels down
+        } else if (groundTractionCount == 1) {
+            chassis.angularVelocity *= 0.93f
         }
     }
 }
